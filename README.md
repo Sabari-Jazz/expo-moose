@@ -29,22 +29,15 @@
 - Expo CLI
 - iOS Simulator (for Mac users) or Android Studio (for Android development)
 
-## 🔧 Installation
 
-1. Clone the repository:
-```bash
-git clone [repository-url]
-cd better-app-in-4-days
-```
-
-2. Install dependencies:
+1. Install dependencies:
 ```bash
 npm install
 # or
 yarn install
 ```
 
-3. Create a `.env` file in the root directory with the following variables:
+2. Create a `.env` file in the root directory with the following variables:
 ```
 SUPABASE_URL=your_supabase_url
 SUPABASE_ANON_KEY=your_supabase_anon_key
