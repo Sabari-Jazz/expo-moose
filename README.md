@@ -1,17 +1,5 @@
 # Moose App
 
-## 🚀 Features
-
-- 📱 Cross-platform mobile application (iOS & Android)
-- 🗺️ Interactive maps with location services
-- 📸 Camera integration for photo capture
-- 🔒 Secure storage for sensitive data
-- 🌐 Web browser integration
-- 🔄 Real-time data synchronization with Supabase
-- 🎨 Modern UI with React Native Paper components
-- 📝 Markdown support for rich text display
-- 🔍 TypeScript for type-safe development
-
 ## 🛠️ Tech Stack
 
 - **Framework**: Expo (v52.0.41)
