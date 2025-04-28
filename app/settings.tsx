@@ -14,14 +14,21 @@ import {
   Button,
   Dialog,
   Portal,
+  ActivityIndicator,
 } from "react-native-paper";
 import { useTheme } from "@/hooks/useTheme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { logout as authLogout, getCurrentUser } from "@/utils/auth";
+import {
+  logout as authLogout,
+  getCurrentUser,
+  getAccessibleSystems,
+} from "@/utils/auth";
 import UserSystemAccessTable from "@/components/UserSystemAccessTable";
+import NotificationSettings from "@/components/NotificationSettings";
+import * as api from "@/api/api";
 
 export default function SettingsScreen() {
   const { isDarkMode, colors } = useTheme();
@@ -29,6 +36,9 @@ export default function SettingsScreen() {
   const [logoutDialogVisible, setLogoutDialogVisible] = useState(false);
   const [userData, setUserData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [systemsLoading, setSystemsLoading] = useState(true);
+  const [allSystems, setAllSystems] = useState<api.PvSystemMetadata[]>([]);
+  const [accessibleSystemIds, setAccessibleSystemIds] = useState<string[]>([]);
 
   // Fetch user data on load
   useEffect(() => {
@@ -36,6 +46,21 @@ export default function SettingsScreen() {
       try {
         const user = await getCurrentUser();
         setUserData(user);
+
+        if (user) {
+          // Get list of accessible system IDs for this user
+          const systemIds = getAccessibleSystems(user.id);
+          setAccessibleSystemIds(systemIds);
+
+          // If user is not admin (admin has access to all systems)
+          if (user.role !== "admin") {
+            console.log(
+              `User ${user.name} has access to ${systemIds.length} systems`
+            );
+          } else {
+            console.log(`Admin user has access to all systems`);
+          }
+        }
       } catch (error) {
         console.error("Error loading user data:", error);
       } finally {
@@ -44,6 +69,36 @@ export default function SettingsScreen() {
     };
 
     loadUserData();
+  }, []);
+
+  // Fetch all systems data
+  useEffect(() => {
+    const loadAllSystems = async () => {
+      try {
+        setSystemsLoading(true);
+
+        // Fetch all systems (with a high limit to get everything)
+        const systems = await api.getPvSystems(0, 1000);
+
+        if (systems && Array.isArray(systems)) {
+          setAllSystems(systems);
+          console.log(`Loaded ${systems.length} PV systems`);
+        } else {
+          console.error(
+            "Failed to load systems or got unexpected format",
+            systems
+          );
+          setAllSystems([]);
+        }
+      } catch (error) {
+        console.error("Error loading systems:", error);
+        setAllSystems([]);
+      } finally {
+        setSystemsLoading(false);
+      }
+    };
+
+    loadAllSystems();
   }, []);
 
   // Handle logout confirmation
@@ -184,7 +239,34 @@ export default function SettingsScreen() {
             System Access
           </Text>
 
-          <UserSystemAccessTable />
+          {systemsLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={{ color: colors.text, marginTop: 12 }}>
+                Loading systems...
+              </Text>
+            </View>
+          ) : (
+            <UserSystemAccessTable
+              systems={allSystems}
+              accessibleSystemIds={accessibleSystemIds}
+              isAdmin={userData?.role === "admin"}
+            />
+          )}
+        </View>
+
+        <Divider style={{ marginVertical: 16 }} />
+
+        {/* Notifications Section */}
+        <View style={styles.section}>
+          <Text
+            variant="titleMedium"
+            style={[styles.sectionTitle, { color: colors.text }]}
+          >
+            Notifications
+          </Text>
+
+          <NotificationSettings />
         </View>
 
         <Divider style={{ marginVertical: 16 }} />
@@ -213,19 +295,6 @@ export default function SettingsScreen() {
           >
             Application
           </Text>
-
-          <List.Item
-            title="Notifications"
-            left={(props) => (
-              <List.Icon {...props} icon="bell" color={colors.primary} />
-            )}
-            right={() => <Switch value={true} />}
-            titleStyle={{ color: colors.text }}
-            style={[
-              styles.listItem,
-              { backgroundColor: isDarkMode ? colors.card : "#fff" },
-            ]}
-          />
 
           <List.Item
             title="Dark Mode"
@@ -324,5 +393,12 @@ const styles = StyleSheet.create({
   logoutButton: {
     marginTop: 8,
     borderRadius: 8,
+  },
+  loadingContainer: {
+    padding: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.03)",
+    borderRadius: 10,
   },
 });

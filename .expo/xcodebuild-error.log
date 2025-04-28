@@ -1,0 +1,10 @@
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:iOS Simulator, arch:arm64, id:12FCE91C-8986-41C6-A170-5F8C8F1BE431, OS:18.4, name:iPhone 16 Plus }
+{ platform:iOS Simulator, arch:x86_64, id:12FCE91C-8986-41C6-A170-5F8C8F1BE431, OS:18.4, name:iPhone 16 Plus }
+** BUILD FAILED **
+
+
+The following build commands failed:
+	CompileC /Users/dewminaimalsha/Library/Developer/Xcode/DerivedData/MooseSolar-dljfdttxkrdhvkfgtyrkxhkdaini/Build/Intermediates.noindex/Pods.build/Debug-iphonesimulator/React-jsinspector.build/Objects-normal/arm64/RuntimeTargetDebuggerSessionObserver.o /Users/dewminaimalsha/Documents/GitHub/expo-moose/node_modules/react-native/ReactCommon/jsinspector-modern/RuntimeTargetDebuggerSessionObserver.cpp normal arm64 c++ com.apple.compilers.llvm.clang.1_0.compiler (in target 'React-jsinspector' from project 'Pods')
+	Building workspace MooseSolar with scheme MooseSolar and configuration Debug
+(2 failures)

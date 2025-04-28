@@ -4,5 +4,10 @@
 
 expo-env.d.ts
 # @end expo-cli
+<<<<<<< Updated upstream
 
 /node_modules
+=======
+/android
+/ios
+>>>>>>> Stashed changes

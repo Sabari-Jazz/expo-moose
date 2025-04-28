@@ -15,12 +15,14 @@ import {
   geocodeAddress,
   formatAddress,
   initGeocoding,
+  getCoordinatesFromSystem,
 } from "../utils/geocoding";
 import { useRouter } from "expo-router";
 import Constants from "expo-constants";
 import { ThemedView } from "./ThemedView";
 import { ThemedText } from "./ThemedText";
 import { useThemeColor } from "@/hooks/useThemeColor";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 interface PvSystemWithCoords extends PvSystem {
   coords?: {
@@ -34,28 +36,6 @@ interface PvSystemMapProps {
   selectedPvSystemId?: string;
   googleMapsApiKey?: string;
 }
-
-// Generate mock coordinates for Canada
-const generateMockCoordinates = (index: number) => {
-  const baseLatitude = 45.4215;
-  const baseLongitude = -75.6972;
-  const row = Math.floor(index / 3);
-  const col = index % 3;
-  return {
-    latitude: baseLatitude + row * 0.05,
-    longitude: baseLongitude + col * 0.05,
-  };
-};
-
-// Generate mock status (will be replaced with actual API data)
-const generateMockStatus = (): "online" | "warning" | "offline" => {
-  const statuses: ("online" | "warning" | "offline")[] = [
-    "online",
-    "warning",
-    "offline",
-  ];
-  return statuses[Math.floor(Math.random() * statuses.length)];
-};
 
 export default function PvSystemMap({
   selectedPvSystemId,
@@ -72,11 +52,10 @@ export default function PvSystemMap({
   });
   const [selectedSystem, setSelectedSystem] = useState<string | null>(null);
   const mapRef = useRef<MapView>(null);
-  const [useRealGeocoding, setUseRealGeocoding] = useState(true);
   const router = useRouter();
   const primaryColor = useThemeColor({}, "tint");
 
-  // Simplified color scheme: green for functioning, red for non-functioning
+  // Simplified color scheme
   const onlineColor = "#4CAF50"; // Green for functioning
   const offlineColor = "#F44336"; // Red for non-functioning
   const warningColor = "#FF9800"; // Orange for warning state
@@ -85,8 +64,7 @@ export default function PvSystemMap({
   const apiKey =
     googleMapsApiKey ||
     Constants.expoConfig?.extra?.googleMapsApiKey ||
-    process.env.GOOGLE_MAPS_API_KEY ||
-    "AIzaSyCUayW-NYs3korrX4LGnNmn9O_MXmwBhpE"; // Fallback value
+    process.env.GOOGLE_MAPS_API_KEY;
 
   // Initialize Geocoding with API key
   useEffect(() => {
@@ -96,11 +74,9 @@ export default function PvSystemMap({
         initGeocoding(apiKey);
       } catch (err) {
         console.error("Failed to initialize Geocoding:", err);
-        setUseRealGeocoding(false);
       }
     } else {
-      console.warn("No Google Maps API key provided, using mock coordinates");
-      setUseRealGeocoding(false);
+      console.warn("No Google Maps API key provided, geocoding may not work");
     }
   }, [apiKey]);
 
@@ -137,6 +113,7 @@ export default function PvSystemMap({
   const fetchData = async () => {
     try {
       setLoading(true);
+
       const data = await getPvSystems();
 
       if (!data || data.length === 0) {
@@ -145,69 +122,137 @@ export default function PvSystemMap({
         return;
       }
 
-      // Process systems with coordinates and mock status
+      console.log(`Fetched ${data.length} PV systems from API`);
+
+      // Process systems with coordinates and status
       const systemsWithCoords = await Promise.all(
-        data.map(async (system, index) => {
+        data.map(async (system) => {
           try {
             let coords;
-            if (
-              useRealGeocoding &&
+
+            // First try to get coordinates directly from the system data
+            const existingCoords = getCoordinatesFromSystem(system);
+            if (existingCoords) {
+              console.log(
+                `Using existing coordinates for system ${
+                  system.name
+                }: ${JSON.stringify(existingCoords)}`
+              );
+              coords = existingCoords;
+            }
+            // Then try geocoding if necessary
+            else if (
+              system.address &&
               system.address.street &&
               system.address.city &&
-              system.address.zipCode &&
+              (system.address.zipCode || system.address.state) &&
               system.address.country
             ) {
               const formattedAddress = formatAddress({
                 street: system.address.street,
                 city: system.address.city,
-                zipCode: system.address.zipCode,
+                zipCode: system.address.zipCode || "",
                 country: system.address.country,
                 state: system.address.state || null,
               });
-              coords = await geocodeAddress(formattedAddress);
+
+              try {
+                coords = await geocodeAddress(formattedAddress);
+                console.log(
+                  `Successfully geocoded: ${
+                    system.name
+                  } at ${formattedAddress} -> ${JSON.stringify(coords)}`
+                );
+              } catch (geocodeErr) {
+                console.error(
+                  `Geocoding failed for ${system.name}, no coordinates available`,
+                  geocodeErr
+                );
+                return null;
+              }
             } else {
-              coords = generateMockCoordinates(index);
+              console.warn(`No location data for system ${system.name}`);
+              return null;
             }
 
-            const status = generateMockStatus();
+            // Determine system status based on API data
+            // In a real app, this would come from the API
+            let status: "online" | "warning" | "offline" = "online";
+
+            // For now we'll set a default, but this should be replaced with actual status from API
+            if (system.status) {
+              status = system.status as "online" | "warning" | "offline";
+            }
 
             return { ...system, coords, status };
           } catch (err) {
-            console.error(`Error for ${system.name}:`, err);
-            return {
-              ...system,
-              coords: generateMockCoordinates(index),
-              status: "offline",
-            };
+            console.error(`Error processing system ${system.name}:`, err);
+            return null;
           }
         })
       );
 
-      setPvSystems(systemsWithCoords as PvSystemWithCoords[]);
+      // Filter out systems without coordinates
+      const validSystems = systemsWithCoords.filter(
+        (system): system is PvSystemWithCoords => system !== null
+      );
 
-      if (selectedPvSystemId) {
-        const selectedSystem = systemsWithCoords.find(
-          (system) => system.pvSystemId === selectedPvSystemId
-        );
-        if (selectedSystem?.coords) {
-          const targetRegion = {
-            latitude: selectedSystem.coords.latitude,
-            longitude: selectedSystem.coords.longitude,
-            latitudeDelta: 0.1,
-            longitudeDelta: 0.1,
-          };
-          setRegion(targetRegion);
-          setTimeout(() => {
-            mapRef.current?.animateToRegion(targetRegion, 1000);
-          }, 500);
+      console.log(
+        `Processed ${validSystems.length} systems with valid coordinates`
+      );
+
+      setPvSystems(validSystems);
+
+      // Calculate map region to fit all pins
+      if (validSystems.length > 0) {
+        if (selectedPvSystemId) {
+          const selectedSystem = validSystems.find(
+            (system) => system.pvSystemId === selectedPvSystemId
+          );
+          if (selectedSystem?.coords) {
+            const targetRegion = {
+              latitude: selectedSystem.coords.latitude,
+              longitude: selectedSystem.coords.longitude,
+              latitudeDelta: 0.5,
+              longitudeDelta: 0.5,
+            };
+            setRegion(targetRegion);
+            setTimeout(() => {
+              mapRef.current?.animateToRegion(targetRegion, 1000);
+            }, 500);
+          }
+        } else {
+          // Calculate the center and span to include all markers
+          let minLat = Number.MAX_VALUE;
+          let maxLat = -Number.MAX_VALUE;
+          let minLng = Number.MAX_VALUE;
+          let maxLng = -Number.MAX_VALUE;
+
+          validSystems.forEach((system) => {
+            if (system.coords) {
+              minLat = Math.min(minLat, system.coords.latitude);
+              maxLat = Math.max(maxLat, system.coords.latitude);
+              minLng = Math.min(minLng, system.coords.longitude);
+              maxLng = Math.max(maxLng, system.coords.longitude);
+            }
+          });
+
+          // Add some padding
+          const paddingFactor = 0.2;
+          const latDelta = (maxLat - minLat) * (1 + paddingFactor);
+          const lngDelta = (maxLng - minLng) * (1 + paddingFactor);
+
+          // Ensure minimum deltas for visibility
+          const finalLatDelta = Math.max(latDelta, 0.5);
+          const finalLngDelta = Math.max(lngDelta, 0.5);
+
+          setRegion({
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLng + maxLng) / 2,
+            latitudeDelta: finalLatDelta,
+            longitudeDelta: finalLngDelta,
+          });
         }
-      } else if (systemsWithCoords.length > 0 && systemsWithCoords[0].coords) {
-        setRegion({
-          latitude: systemsWithCoords[0].coords.latitude,
-          longitude: systemsWithCoords[0].coords.longitude,
-          latitudeDelta: 10,
-          longitudeDelta: 10,
-        });
       }
 
       setError(null);
@@ -221,7 +266,52 @@ export default function PvSystemMap({
 
   useEffect(() => {
     fetchData();
-  }, [selectedPvSystemId, useRealGeocoding]);
+  }, [selectedPvSystemId]);
+
+  useEffect(() => {
+    if (!loading && pvSystems.length > 0 && mapRef.current) {
+      // Add a slight delay to ensure map is ready
+      setTimeout(() => {
+        try {
+          // Create an array of valid marker coordinates
+          const validCoords = pvSystems
+            .filter(
+              (system) =>
+                system.coords &&
+                system.coords.latitude &&
+                system.coords.longitude
+            )
+            .map((system) => ({
+              latitude: system.coords!.latitude,
+              longitude: system.coords!.longitude,
+            }));
+
+          if (validCoords.length > 0 && mapRef.current) {
+            console.log(`Fitting map to ${validCoords.length} markers`);
+
+            // If we only have one marker, zoom to it with a reasonable zoom level
+            if (validCoords.length === 1) {
+              const region = {
+                latitude: validCoords[0].latitude,
+                longitude: validCoords[0].longitude,
+                latitudeDelta: 0.5,
+                longitudeDelta: 0.5,
+              };
+              mapRef.current.animateToRegion(region, 1000);
+            } else {
+              // Fit to all markers
+              mapRef.current.fitToCoordinates(validCoords, {
+                edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
+                animated: true,
+              });
+            }
+          }
+        } catch (err: any) {
+          console.error("Error fitting map to coordinates:", err);
+        }
+      }, 500);
+    }
+  }, [loading, pvSystems]);
 
   if (loading) {
     return (
@@ -244,7 +334,7 @@ export default function PvSystemMap({
     );
   }
 
-  if (!useRealGeocoding && !(apiKey && apiKey !== "YOUR_Maps_API_KEY")) {
+  if (!apiKey) {
     return (
       <ThemedView style={styles.centered}>
         <ThemedText type="error" style={styles.errorText}>
@@ -265,115 +355,131 @@ export default function PvSystemMap({
         showsUserLocation={true}
         showsMyLocationButton={true}
         showsCompass={true}
+        mapType="standard"
+        onMapReady={() => {
+          console.log("Map loaded successfully");
+        }}
       >
-        {pvSystems.map((system) => (
-          <Marker
-            key={system.pvSystemId}
-            coordinate={{
-              latitude: system.coords?.latitude || 0,
-              longitude: system.coords?.longitude || 0,
-            }}
-            pinColor={system.status === "online" ? onlineColor : offlineColor}
-            onPress={() => handleMarkerPress(system.pvSystemId)}
-          >
-            <Callout
-              tooltip
-              onPress={() => navigateToDetail(system.pvSystemId)}
+        {pvSystems.map((system) => {
+          // Skip systems with invalid coordinates
+          if (
+            !system.coords ||
+            !system.coords.latitude ||
+            !system.coords.longitude
+          ) {
+            return null;
+          }
+
+          return (
+            <Marker
+              key={system.pvSystemId}
+              coordinate={{
+                latitude: system.coords.latitude,
+                longitude: system.coords.longitude,
+              }}
+              pinColor={getStatusColor(system.status)}
+              onPress={() => handleMarkerPress(system.pvSystemId)}
+              tracksViewChanges={false}
             >
-              <ThemedView type="elevated" style={styles.calloutContainer}>
-                <View style={styles.callout}>
-                  <View style={styles.calloutHeader}>
-                    <ThemedText type="heading" style={styles.calloutTitle}>
-                      {system.name}
-                    </ThemedText>
-                    <View
-                      style={[
-                        styles.statusDot,
-                        { backgroundColor: getStatusColor(system.status) },
-                      ]}
-                    />
-                  </View>
-
-                  <View style={styles.calloutImageContainer}>
-                    {system.pictureURL ? (
-                      <Image
-                        source={{ uri: system.pictureURL }}
-                        style={styles.calloutImage}
-                        resizeMode="cover"
+              <Callout
+                tooltip
+                onPress={() => navigateToDetail(system.pvSystemId)}
+              >
+                <ThemedView type="elevated" style={styles.calloutContainer}>
+                  <View style={styles.callout}>
+                    <View style={styles.calloutHeader}>
+                      <ThemedText type="heading" style={styles.calloutTitle}>
+                        {system.name}
+                      </ThemedText>
+                      <View
+                        style={[
+                          styles.statusDot,
+                          { backgroundColor: getStatusColor(system.status) },
+                        ]}
                       />
-                    ) : (
-                      <View style={styles.placeholderImage}>
-                        <ThemedText type="caption">No Image</ThemedText>
-                      </View>
-                    )}
-                  </View>
-
-                  <View style={styles.calloutContent}>
-                    <ThemedText type="caption" style={styles.calloutLocation}>
-                      {formatAddress({
-                        street: system.address.street || "",
-                        city: system.address.city || "",
-                        zipCode: system.address.zipCode || "",
-                        country: system.address.country || "",
-                        state: system.address.state || null,
-                      })}
-                    </ThemedText>
-
-                    <View style={styles.calloutStats}>
-                      <View style={styles.stat}>
-                        <ThemedText type="caption" style={styles.statLabel}>
-                          Status:
-                        </ThemedText>
-                        <ThemedText
-                          type="caption"
-                          style={[
-                            styles.statValue,
-                            { color: getStatusColor(system.status) },
-                          ]}
-                        >
-                          {system.status === "online"
-                            ? "Online"
-                            : system.status === "warning"
-                            ? "Warning"
-                            : "Offline"}
-                        </ThemedText>
-                      </View>
-
-                      <View style={styles.stat}>
-                        <ThemedText type="caption" style={styles.statLabel}>
-                          Power:
-                        </ThemedText>
-                        <ThemedText type="caption" style={styles.statValue}>
-                          {system.peakPower ? `${system.peakPower} W` : "N/A"}
-                        </ThemedText>
-                      </View>
-
-                      <View style={styles.stat}>
-                        <ThemedText type="caption" style={styles.statLabel}>
-                          Installed:
-                        </ThemedText>
-                        <ThemedText type="caption" style={styles.statValue}>
-                          {new Date(
-                            system.installationDate
-                          ).toLocaleDateString()}
-                        </ThemedText>
-                      </View>
                     </View>
 
-                    <TouchableOpacity
-                      style={styles.viewDetailsButton}
-                      onPress={() => navigateToDetail(system.pvSystemId)}
-                    >
-                      <ThemedText type="link" style={styles.viewDetailsText}>
-                        Tap to view details
+                    <View style={styles.calloutImageContainer}>
+                      {system.pictureURL ? (
+                        <Image
+                          source={{ uri: system.pictureURL }}
+                          style={styles.calloutImage}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={styles.placeholderImage}>
+                          <ThemedText type="caption">No Image</ThemedText>
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={styles.calloutContent}>
+                      <ThemedText type="caption" style={styles.calloutLocation}>
+                        {formatAddress({
+                          street: system.address.street || "",
+                          city: system.address.city || "",
+                          zipCode: system.address.zipCode || "",
+                          country: system.address.country || "",
+                          state: system.address.state || null,
+                        })}
                       </ThemedText>
-                    </TouchableOpacity>
+
+                      <View style={styles.calloutStats}>
+                        <View style={styles.stat}>
+                          <ThemedText type="caption" style={styles.statLabel}>
+                            Status:
+                          </ThemedText>
+                          <ThemedText
+                            type="caption"
+                            style={[
+                              styles.statValue,
+                              { color: getStatusColor(system.status) },
+                            ]}
+                          >
+                            {system.status === "online"
+                              ? "Online"
+                              : system.status === "warning"
+                              ? "Warning"
+                              : "Offline"}
+                          </ThemedText>
+                        </View>
+
+                        <View style={styles.stat}>
+                          <ThemedText type="caption" style={styles.statLabel}>
+                            Power:
+                          </ThemedText>
+                          <ThemedText type="caption" style={styles.statValue}>
+                            {system.peakPower ? `${system.peakPower} W` : "N/A"}
+                          </ThemedText>
+                        </View>
+
+                        <View style={styles.stat}>
+                          <ThemedText type="caption" style={styles.statLabel}>
+                            Installed:
+                          </ThemedText>
+                          <ThemedText type="caption" style={styles.statValue}>
+                            {new Date(
+                              system.installationDate
+                            ).toLocaleDateString()}
+                          </ThemedText>
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        style={styles.viewDetailsButton}
+                        onPress={() => navigateToDetail(system.pvSystemId)}
+                      >
+                        <ThemedText type="link" style={styles.viewDetailsText}>
+                          Tap to view details
+                        </ThemedText>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                </View>
-              </ThemedView>
-            </Callout>
-          </Marker>
-        ))}
+                </ThemedView>
+              </Callout>
+            </Marker>
+          );
+        })}
       </MapView>
     </ThemedView>
   );

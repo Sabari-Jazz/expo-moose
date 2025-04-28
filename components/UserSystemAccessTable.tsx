@@ -3,49 +3,82 @@ import { View, StyleSheet, ScrollView } from "react-native";
 import { DataTable, Text, Button, Card, Divider } from "react-native-paper";
 import { getCurrentUser, getAccessibleSystems, User } from "@/utils/auth";
 import { useTheme } from "@/hooks/useTheme";
+import { PvSystemMetadata } from "@/api/api";
 
 interface UserSystemAccessTableProps {
   userId?: string;
   showAllSystems?: boolean;
+  systems?: PvSystemMetadata[];
+  accessibleSystemIds?: string[];
+  isAdmin?: boolean;
 }
 
 const UserSystemAccessTable = ({
   userId,
   showAllSystems = false,
+  systems: propsSystems,
+  accessibleSystemIds: propsAccessibleSystemIds,
+  isAdmin: propsIsAdmin,
 }: UserSystemAccessTableProps) => {
   const { colors, isDarkMode } = useTheme();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<Omit<User, "password"> | null>(null);
   const [accessibleSystems, setAccessibleSystems] = useState<string[]>([]);
-  const [allSystems, setAllSystems] = useState<any[]>([]);
+  const [allSystems, setAllSystems] = useState<PvSystemMetadata[]>([]);
+  const [userIsAdmin, setUserIsAdmin] = useState(false);
 
-  const systems = [
+  const mockSystems = [
     {
-      id: "bf915090-5f59-4128-a206-46c73f2f779d",
+      pvSystemId: "bf915090-5f59-4128-a206-46c73f2f779d",
       name: "Solar System 1",
-      location: "Berlin",
+      address: { city: "Berlin", country: "Germany" },
     },
     {
-      id: "f2fafda2-9b07-40e3-875f-db6409040b9c",
+      pvSystemId: "f2fafda2-9b07-40e3-875f-db6409040b9c",
       name: "Solar System 2",
-      location: "Munich",
+      address: { city: "Munich", country: "Germany" },
     },
     {
-      id: "38e65323-1b9c-4a0f-8f4e-73d42e21c5c4",
+      pvSystemId: "38e65323-1b9c-4a0f-8f4e-73d42e21c5c4",
       name: "Solar System 3",
-      location: "Frankfurt",
+      address: { city: "Frankfurt", country: "Germany" },
     },
     {
-      id: "7fd989a3-1d23-4b8c-9efa-c34c03e3829d",
+      pvSystemId: "7fd989a3-1d23-4b8c-9efa-c34c03e3829d",
       name: "Solar System 4",
-      location: "Hamburg",
+      address: { city: "Hamburg", country: "Germany" },
     },
   ];
+
+  const formatAddress = (address: any) => {
+    if (!address) return "Unknown";
+
+    const parts = [address.city, address.state, address.country].filter(
+      Boolean
+    );
+
+    return parts.join(", ");
+  };
 
   useEffect(() => {
     const fetchUserData = async () => {
       try {
         setLoading(true);
+
+        if (propsSystems) {
+          setAllSystems(propsSystems);
+
+          if (propsAccessibleSystemIds) {
+            setAccessibleSystems(propsAccessibleSystemIds);
+          }
+
+          if (propsIsAdmin !== undefined) {
+            setUserIsAdmin(propsIsAdmin);
+          }
+
+          setLoading(false);
+          return;
+        }
 
         const currentUser = userId ? null : await getCurrentUser();
         const userToUse = userId || currentUser?.id;
@@ -53,21 +86,22 @@ const UserSystemAccessTable = ({
         if (userToUse) {
           if (currentUser) {
             setUser(currentUser);
+            setUserIsAdmin(currentUser.role === "admin");
           }
 
           const accessibleSystemIds = getAccessibleSystems(userToUse);
-
           const isAdmin =
             currentUser?.role === "admin" || accessibleSystemIds.length === 0;
+          setUserIsAdmin(isAdmin);
 
           if (isAdmin || showAllSystems) {
-            setAllSystems(systems);
+            setAllSystems(mockSystems);
             setAccessibleSystems([]);
           } else {
-            const filteredSystems = systems.filter((s) =>
-              accessibleSystemIds.includes(s.id)
+            const filteredSystems = mockSystems.filter((s) =>
+              accessibleSystemIds.includes(s.pvSystemId)
             );
-            setAllSystems(systems);
+            setAllSystems(mockSystems);
             setAccessibleSystems(accessibleSystemIds);
           }
         }
@@ -79,7 +113,13 @@ const UserSystemAccessTable = ({
     };
 
     fetchUserData();
-  }, [userId, showAllSystems]);
+  }, [
+    userId,
+    showAllSystems,
+    propsSystems,
+    propsAccessibleSystemIds,
+    propsIsAdmin,
+  ]);
 
   if (loading) {
     return (
@@ -89,7 +129,7 @@ const UserSystemAccessTable = ({
     );
   }
 
-  if (!user && !userId) {
+  if (!user && !userId && !propsSystems) {
     return (
       <View style={styles.centered}>
         <Text>You must be logged in to view this information.</Text>
@@ -97,27 +137,25 @@ const UserSystemAccessTable = ({
     );
   }
 
-  const isAdmin = user?.role === "admin";
-
   return (
     <Card style={[styles.container, { backgroundColor: colors.card }]}>
       <Card.Title
         title="System Access Information"
         subtitle={
-          isAdmin
+          userIsAdmin
             ? "Administrator Access (All Systems)"
             : "User-Specific Access"
         }
       />
 
       <Card.Content>
-        {isAdmin && (
+        {userIsAdmin && (
           <Text style={styles.adminText}>
             As an administrator, you have access to all systems in the network.
           </Text>
         )}
 
-        {!isAdmin && (
+        {!userIsAdmin && (
           <Text style={styles.userText}>
             You have access to {accessibleSystems.length} specific systems.
           </Text>
@@ -142,18 +180,18 @@ const UserSystemAccessTable = ({
 
             {allSystems.map((system) => {
               const hasAccess =
-                isAdmin || accessibleSystems.includes(system.id);
+                userIsAdmin || accessibleSystems.includes(system.pvSystemId);
 
               return (
-                <DataTable.Row key={system.id}>
+                <DataTable.Row key={system.pvSystemId}>
                   <DataTable.Cell style={styles.idColumn}>
-                    {system.id.substring(0, 8)}...
+                    {system.pvSystemId.substring(0, 8)}...
                   </DataTable.Cell>
                   <DataTable.Cell style={styles.nameColumn}>
                     {system.name}
                   </DataTable.Cell>
                   <DataTable.Cell style={styles.locationColumn}>
-                    {system.location}
+                    {formatAddress(system.address)}
                   </DataTable.Cell>
                   <DataTable.Cell style={styles.accessColumn}>
                     <View style={styles.accessIndicator}>

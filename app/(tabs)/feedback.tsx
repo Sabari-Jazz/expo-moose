@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   StyleSheet,
   View,
@@ -10,14 +10,13 @@ import {
   Platform,
   ScrollView,
   Text,
-  ToastAndroid,
 } from "react-native";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useThemeColor } from "@/hooks/useThemeColor";
 import { uploadFeedback } from "@/services/feedbackService";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { supabase, testSupabaseConnection } from "@/utils/supabase";
+import { router } from "expo-router";
 
 export default function FeedbackScreen() {
   const [name, setName] = useState("");
@@ -25,87 +24,17 @@ export default function FeedbackScreen() {
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [lastTicketId, setLastTicketId] = useState<string | null>(null);
-  const [networkStatus, setNetworkStatus] = useState<
-    "checking" | "online" | "offline"
-  >("checking");
-  const [supabaseStatus, setSupabaseStatus] = useState<
-    "checking" | "connected" | "disconnected"
-  >("checking");
 
   const primaryColor = useThemeColor({}, "tint");
   const backgroundColor = useThemeColor({}, "background");
   const textColor = useThemeColor({}, "text");
   const borderColor = useThemeColor({}, "border");
-  const errorColor = "#FF3B30";
   const insets = useSafeAreaInsets();
 
   // Bottom tab height adaptation
   const tabBarHeight = Platform.OS === "ios" ? 100 : 80;
 
-  // Check network and Supabase status on mount
-  useEffect(() => {
-    checkNetworkStatus();
-    checkSupabaseConnection();
-  }, []);
-
-  const checkSupabaseConnection = async () => {
-    setSupabaseStatus("checking");
-    const isConnected = await testSupabaseConnection();
-    setSupabaseStatus(isConnected ? "connected" : "disconnected");
-  };
-
-  const checkNetworkStatus = async () => {
-    try {
-      setNetworkStatus("checking");
-
-      // Simple timeout function that works everywhere
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Network request timeout")), 5000)
-      );
-
-      // Fetch request
-      const fetchPromise = fetch("https://www.google.com", { method: "HEAD" });
-
-      // Race between fetch and timeout
-      const response = await Promise.race([fetchPromise, timeoutPromise]);
-
-      // If we get here, the fetch succeeded before the timeout
-      console.log("Network check succeeded, online status detected");
-      setNetworkStatus("online");
-    } catch (error) {
-      console.log("Network check failed:", error);
-
-      // For iOS simulator, assume online
-      if (Platform.OS === "ios") {
-        console.log("iOS simulator detected, assuming online");
-        setNetworkStatus("online");
-      } else {
-        setNetworkStatus("offline");
-      }
-    }
-  };
-
   const handleSubmit = async () => {
-    // Re-check network status
-    if (networkStatus === "offline") {
-      await checkNetworkStatus();
-
-      if (networkStatus === "offline") {
-        if (Platform.OS === "android") {
-          ToastAndroid.show(
-            "Device appears to be offline. Feedback will be saved locally.",
-            ToastAndroid.LONG
-          );
-        } else {
-          Alert.alert(
-            "Network Issue",
-            "Your device appears to be offline. Your feedback will be saved locally and submitted when a connection is available.",
-            [{ text: "OK" }]
-          );
-        }
-      }
-    }
-
     // Simple form validation
     if (name.trim() === "") {
       Alert.alert("Error", "Please enter your name");
@@ -124,21 +53,20 @@ export default function FeedbackScreen() {
 
     try {
       setSubmitting(true);
-      console.log("Submitting feedback to the database...");
+      console.log("Saving feedback locally...");
 
       // Create feedback object
       const feedbackData = {
         name: name.trim(),
         email: email.trim(),
         message: message.trim(),
-        timestamp: new Date().toISOString(),
       };
 
       // Call the upload function
       const result = await uploadFeedback(feedbackData);
       setLastTicketId(result.ticketId);
 
-      console.log("Feedback submitted successfully:", result.ticketId);
+      console.log("Feedback saved successfully:", result.ticketId);
 
       // Show success message and clear form
       Alert.alert(
@@ -157,31 +85,19 @@ export default function FeedbackScreen() {
         ]
       );
     } catch (error) {
-      console.error("Error submitting feedback:", error);
+      console.error("Error saving feedback:", error);
 
-      // Display error message with more details
-      Alert.alert(
-        "Error",
-        "Failed to save your feedback. " +
-          (networkStatus === "offline" ? "You appear to be offline. " : "") +
-          "The issue has been logged and your feedback will be saved locally.",
-        [
-          {
-            text: "Try Again",
-            onPress: () => {
-              checkNetworkStatus();
-              setTimeout(handleSubmit, 1000);
-            },
-          },
-          {
-            text: "Cancel",
-            style: "cancel",
-          },
-        ]
-      );
+      // Display error message
+      Alert.alert("Error", "Failed to save your feedback. Please try again.", [
+        { text: "OK" },
+      ]);
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const navigateToAdmin = () => {
+    router.push("/feedback-admin");
   };
 
   return (
@@ -203,15 +119,6 @@ export default function FeedbackScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <ThemedView type="card" style={styles.formContainer}>
-            {networkStatus === "offline" && (
-              <View style={styles.offlineNotice}>
-                <Text style={styles.offlineText}>
-                  You are currently offline. Feedback will be saved locally and
-                  submitted when online.
-                </Text>
-              </View>
-            )}
-
             <ThemedText type="subtitle" style={styles.title}>
               We value your feedback
             </ThemedText>
@@ -312,38 +219,11 @@ export default function FeedbackScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.retryConnection}
-              onPress={() => {
-                checkNetworkStatus();
-                checkSupabaseConnection();
-              }}
+              style={[styles.adminButton, { borderColor: primaryColor }]}
+              onPress={navigateToAdmin}
             >
-              <ThemedText style={styles.retryConnectionText}>
-                {networkStatus === "checking"
-                  ? "Checking connection..."
-                  : networkStatus === "online"
-                  ? "Network: Online"
-                  : "Network: Offline - Tap to retry"}
-              </ThemedText>
-              <ThemedText
-                style={[
-                  styles.retryConnectionText,
-                  {
-                    color:
-                      supabaseStatus === "connected"
-                        ? "#34C759" // Green
-                        : supabaseStatus === "checking"
-                        ? "#FF9500" // Orange
-                        : "#FF3B30", // Red
-                    marginTop: 4,
-                  },
-                ]}
-              >
-                {supabaseStatus === "checking"
-                  ? "Checking database..."
-                  : supabaseStatus === "connected"
-                  ? "Database: Connected"
-                  : "Database: Disconnected - Tap to retry"}
+              <ThemedText style={{ color: primaryColor }}>
+                View All Feedback
               </ThemedText>
             </TouchableOpacity>
           </ThemedView>
@@ -419,26 +299,12 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 16,
   },
-  offlineNotice: {
-    backgroundColor: "rgba(255, 59, 48, 0.1)",
-    padding: 12,
+  adminButton: {
+    height: 40,
     borderRadius: 8,
-    marginBottom: 20,
-    alignItems: "center",
-  },
-  offlineText: {
-    fontSize: 14,
-    color: "#FF3B30",
-  },
-  retryConnection: {
-    height: 50,
-    borderRadius: 8,
+    borderWidth: 1,
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 16,
-  },
-  retryConnectionText: {
-    fontSize: 14,
-    opacity: 0.7,
+    marginTop: 12,
   },
 });

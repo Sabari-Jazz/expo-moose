@@ -20,6 +20,9 @@ import { LocalIonicon } from "@/components/ui/LocalIonicon";
 import { useThemeColor } from "@/hooks/useThemeColor";
 import { useSession } from "@/utils/sessionContext";
 
+/**
+ * The tab layout for the app's main navigation
+ */
 export default function TabLayout() {
   const { isDarkMode, colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -29,15 +32,12 @@ export default function TabLayout() {
   const borderColor = useThemeColor({}, "border");
   const { signOut } = useSession();
 
-
   const goToSettings = () => {
     router.push("/settings");
   };
 
-
   const handleLogout = async () => {
     await signOut();
-
   };
 
   return (
@@ -45,7 +45,7 @@ export default function TabLayout() {
       screenOptions={{
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: Platform.OS === "ios" ? "#8E8E93" : "#757575",
-        headerShown: true,
+        headerShown: false,
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
         tabBarHideOnKeyboard: false,

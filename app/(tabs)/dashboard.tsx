@@ -22,8 +22,11 @@ import {
   PvSystemMetadata,
   FlowDataResponse,
   AggregatedDataResponse,
+  SystemMessage,
 } from "@/api/api";
 import * as api from "@/api/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getCurrentUser, getAccessibleSystems } from "@/utils/auth";
 
 interface EnhancedPvSystem {
   id: string;
@@ -36,6 +39,7 @@ interface EnhancedPvSystem {
   pictureURL: string | null;
   peakPower: number | null;
   isActive: boolean;
+  errorMessages?: SystemMessage[];
 }
 
 interface BasicPvSystem {
@@ -65,10 +69,56 @@ export default function DashboardScreen() {
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingAllSystems, setIsLoadingAllSystems] = useState(true);
   const SYSTEMS_PER_PAGE = 10;
+  const [demoMode, setDemoMode] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{
+    id: string;
+    role: string;
+    name?: string;
+  } | null>(null);
+  const [accessibleSystemIds, setAccessibleSystemIds] = useState<string[]>([]);
 
   // Helper function to format date for API calls
   const getShortDateString = (date: Date): string => {
     return date.toISOString().split("T")[0];
+  };
+
+  // Load current user and accessible systems
+  useEffect(() => {
+    const loadUserAndAccessibleSystems = async () => {
+      try {
+        const user = await getCurrentUser();
+        setCurrentUser(user);
+
+        if (user) {
+          const systemIds = getAccessibleSystems(user.id);
+          setAccessibleSystemIds(systemIds);
+          console.log(
+            `User ${user.name} has access to ${
+              systemIds.length === 0 ? "all" : systemIds.length
+            } systems`
+          );
+        }
+      } catch (error) {
+        console.error("Error loading user and accessible systems:", error);
+      }
+    };
+
+    loadUserAndAccessibleSystems();
+  }, []);
+
+  // Filter function to check if current user has access to a system
+  const hasAccessToSystem = (systemId: string): boolean => {
+    // If user is null or not loaded yet, don't show any systems
+    if (!currentUser) return false;
+
+    // Admin role has access to all systems
+    if (currentUser.role === "admin") return true;
+
+    // For regular users, check against accessible system IDs
+    // Empty array means all systems are accessible (for admin)
+    return (
+      accessibleSystemIds.length === 0 || accessibleSystemIds.includes(systemId)
+    );
   };
 
   // Helper functions
@@ -83,11 +133,18 @@ export default function DashboardScreen() {
   };
 
   const determineStatus = (
-    flowData: FlowDataResponse | null
+    flowData: FlowDataResponse | null,
+    errorMessages: SystemMessage[] = []
   ): "online" | "offline" | "warning" => {
     if (!flowData || !flowData.status || !flowData.status.isOnline) {
       return "offline";
     }
+
+    // System is online, but has error messages - mark as warning
+    if (errorMessages && errorMessages.length > 0) {
+      return "warning";
+    }
+
     return "online";
   };
 
@@ -153,17 +210,31 @@ export default function DashboardScreen() {
     return "0 kWh";
   };
 
+  // Fix the date format for API calls - format to match API requirements
+  const formatApiDateString = (date: Date): string => {
+    // Format to YYYY-MM-DDThh:mm:ssZ without milliseconds
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const seconds = String(date.getSeconds()).padStart(2, "0");
+
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}Z`;
+  };
+
   // Format PV system data for display
   const formatPvSystemData = (
     system: api.PvSystemMetadata,
     flowData: api.FlowDataResponse | null,
-    aggrToday: api.AggregatedDataResponse | null
+    aggrToday: api.AggregatedDataResponse | null,
+    errorMessages: SystemMessage[] = []
   ): EnhancedPvSystem => {
     // Format the address
     const address = formatAddress(system.address);
 
-    // Determine system status
-    const status = determineStatus(flowData);
+    // Determine system status based on flow data and error messages
+    const status = determineStatus(flowData, errorMessages);
 
     // Extract and format current power
     const power = extractPower(flowData);
@@ -183,7 +254,8 @@ export default function DashboardScreen() {
       ),
       pictureURL: system.pictureURL,
       peakPower: system.peakPower,
-      isActive: status === "online",
+      isActive: status === "online" || status === "warning",
+      errorMessages: errorMessages,
     };
   };
 
@@ -215,7 +287,21 @@ export default function DashboardScreen() {
       console.log(`Loaded ${allSystemsData.length} systems for search`);
 
       // Map to basic info without loading flow data or other details
-      const basicSystemsInfo = allSystemsData.map(formatBasicSystemData);
+      let basicSystemsInfo = allSystemsData.map(formatBasicSystemData);
+
+      // Filter systems based on access if user is not admin
+      if (
+        currentUser &&
+        currentUser.role !== "admin" &&
+        accessibleSystemIds.length > 0
+      ) {
+        basicSystemsInfo = basicSystemsInfo.filter((system) =>
+          hasAccessToSystem(system.id)
+        );
+        console.log(
+          `Filtered to ${basicSystemsInfo.length} accessible systems for user ${currentUser.name}`
+        );
+      }
 
       setAllSystemsBasicInfo(basicSystemsInfo);
       setTotalSystems(basicSystemsInfo.length);
@@ -284,8 +370,40 @@ export default function DashboardScreen() {
               }
             );
 
+            // Fetch error messages from the last 24 hours
+            let errorMessages: SystemMessage[] = [];
+            try {
+              const fromDate = new Date();
+              fromDate.setDate(fromDate.getDate() - 1); // Go back 1 day
+
+              // Use the correctly formatted date string
+              const formattedFromDate = formatApiDateString(fromDate);
+
+              errorMessages = await api.getPvSystemMessages(basicSystem.id, {
+                from: formattedFromDate,
+                stateseverity: "Error",
+                limit: 5, // Limit to the most recent 5 errors
+              });
+
+              if (errorMessages.length > 0) {
+                console.log(
+                  `System ${basicSystem.id} has ${errorMessages.length} error messages`
+                );
+              }
+            } catch (msgErr) {
+              console.warn(
+                `Failed to fetch error messages for ${basicSystem.id}:`,
+                msgErr
+              );
+            }
+
             // Format with flow data and aggregated data
-            return formatPvSystemData(fullSystemData, flowData, aggrToday);
+            return formatPvSystemData(
+              fullSystemData,
+              flowData,
+              aggrToday,
+              errorMessages
+            );
           } catch (err) {
             console.error(
               `Error fetching data for search result ${basicSystem.id}:`,
@@ -304,6 +422,7 @@ export default function DashboardScreen() {
               pictureURL: basicSystem.pictureURL,
               peakPower: null,
               isActive: false,
+              errorMessages: [],
             };
           }
         })
@@ -342,7 +461,7 @@ export default function DashboardScreen() {
 
     // Load all systems basic info for search
     loadAllSystemsBasicInfo();
-  }, []);
+  }, [currentUser, accessibleSystemIds]);
 
   // Function to load a page of PV systems from the API
   const loadPvSystemsPage = async (page: number, showLoading = true) => {
@@ -372,14 +491,30 @@ export default function DashboardScreen() {
 
       console.log(`Fetched ${systemsData.length} PV systems for page ${page}`);
 
-      // Check if we have more pages
-      setHasMorePages(systemsData.length === SYSTEMS_PER_PAGE);
+      // Filter systems based on user access
+      const accessibleSystemsData =
+        currentUser?.role === "admin" || accessibleSystemIds.length === 0
+          ? systemsData
+          : systemsData.filter((system) =>
+              hasAccessToSystem(system.pvSystemId)
+            );
+
+      console.log(
+        `User has access to ${accessibleSystemsData.length} of the ${systemsData.length} systems`
+      );
+
+      // Check if we have more pages - only if the full page was returned and the user has access to all of them
+      setHasMorePages(
+        systemsData.length === SYSTEMS_PER_PAGE &&
+          accessibleSystemsData.length > 0
+      );
 
       // Create an array to hold system metadata for this page
       const enhancedSystems = await Promise.all(
-        systemsData.map(async (system) => {
+        accessibleSystemsData.map(async (system) => {
           let flowData: api.FlowDataResponse | null = null;
           let aggrToday: api.AggregatedDataResponse | null = null;
+          let errorMessages: SystemMessage[] = [];
 
           try {
             // Fetch flow data for current power and status
@@ -391,15 +526,51 @@ export default function DashboardScreen() {
               duration: 1,
             });
 
-            // Format system data with BOTH flow and aggregated data
-            return formatPvSystemData(system, flowData, aggrToday);
+            // Fetch error messages from the last 24 hours
+            try {
+              const fromDate = new Date();
+              fromDate.setDate(fromDate.getDate() - 1); // Go back 1 day
+
+              // Use the correctly formatted date string
+              const formattedFromDate = formatApiDateString(fromDate);
+
+              errorMessages = await api.getPvSystemMessages(system.pvSystemId, {
+                from: formattedFromDate,
+                stateseverity: "Error",
+                limit: 5, // Limit to the most recent 5 errors
+              });
+
+              if (errorMessages.length > 0) {
+                console.log(
+                  `System ${system.pvSystemId} has ${errorMessages.length} error messages`
+                );
+              }
+            } catch (msgErr) {
+              console.warn(
+                `Failed to fetch error messages for ${system.pvSystemId}:`,
+                msgErr
+              );
+            }
+
+            // Format system data with flow data, aggregated data, and error messages
+            return formatPvSystemData(
+              system,
+              flowData,
+              aggrToday,
+              errorMessages
+            );
           } catch (err) {
             console.error(
               `Error fetching data for system ${system.pvSystemId}:`,
               err
             );
             // Return basic system data without flow data
-            return formatPvSystemData(system, flowData, aggrToday);
+            return formatPvSystemData(
+              system,
+              flowData,
+              aggrToday,
+              errorMessages
+            );
           }
         })
       );
@@ -464,7 +635,7 @@ export default function DashboardScreen() {
       case "online":
         return "#4CAF50"; // Green
       case "warning":
-        return "#FFC107"; // Amber
+        return "#FF9800"; // Amber/Orange
       case "offline":
         return "#F44336"; // Red
       default:
@@ -488,17 +659,30 @@ export default function DashboardScreen() {
           style={[
             styles.card,
             { backgroundColor: isDarkMode ? colors.card : "#fff" },
+            demoMode && { borderWidth: 1, borderColor: "#FF9800" },
           ]}
           onPress={() => navigateToDetail(item.id)}
+          onLongPress={() => {
+            if (demoMode) {
+              console.log(`Long press detected on system ${item.id}`);
+              cycleDemoStatus(item.id);
+            }
+          }}
+          delayLongPress={500}
         >
-          <Card.Content>
+          {demoMode && (
+            <View style={styles.demoIndicator}>
+              <Text style={styles.demoText}>Long press to change status</Text>
+            </View>
+          )}
+          <Card.Content style={styles.cardContentContainer}>
             <View style={styles.cardRow}>
               <View style={styles.imageContainer}>
                 {item.pictureURL ? (
                   <Image
                     source={{ uri: item.pictureURL }}
                     style={styles.image}
-                    contentFit="cover"
+                    resizeMode="cover"
                   />
                 ) : (
                   <View style={styles.placeholderImage}>
@@ -519,6 +703,14 @@ export default function DashboardScreen() {
                       {item.name}
                     </Text>
                     <View style={styles.statusChipContainer}>
+                      {item.status === "warning" && (
+                        <Ionicons
+                          // name="warning"
+                          size={16}
+                          color="#FF9800"
+                          style={styles.warningIcon}
+                        />
+                      )}
                       <Chip
                         style={[
                           styles.statusChip,
@@ -675,6 +867,89 @@ export default function DashboardScreen() {
     return null;
   };
 
+  // Update the toggleDemoMode function to use AsyncStorage
+  const toggleDemoMode = async () => {
+    const newDemoMode = !demoMode;
+    setDemoMode(newDemoMode);
+
+    // Store demo mode setting for other screens
+    try {
+      await AsyncStorage.setItem("demo_mode", newDemoMode.toString());
+      console.log(`Demo mode ${newDemoMode ? "enabled" : "disabled"}`);
+    } catch (error) {
+      console.error("Error saving demo mode state:", error);
+    }
+  };
+
+  // Add an effect to check for demo mode on initial load
+  useEffect(() => {
+    const checkDemoMode = async () => {
+      try {
+        const demoModeValue = await AsyncStorage.getItem("demo_mode");
+        if (demoModeValue !== null) {
+          setDemoMode(demoModeValue === "true");
+        }
+      } catch (error) {
+        console.error("Error retrieving demo mode state:", error);
+      }
+    };
+
+    checkDemoMode();
+  }, []);
+
+  // Add a function to cycle through status states for a system in demo mode
+  const cycleDemoStatus = (systemId: string) => {
+    setPvSystems((prevSystems) => {
+      const updatedSystems = prevSystems.map((system) => {
+        if (system.id === systemId) {
+          // Cycle through states: online -> warning -> offline -> online
+          let newStatus: "online" | "warning" | "offline";
+          if (system.status === "online") newStatus = "warning";
+          else if (system.status === "warning") newStatus = "offline";
+          else newStatus = "online";
+
+          console.log(
+            `Demo: Changed system ${system.name} status to ${newStatus}`
+          );
+
+          // If switching to warning state, add a mock error message
+          const mockErrorMessages =
+            newStatus === "warning"
+              ? [
+                  {
+                    pvSystemId: system.id,
+                    deviceId: "demo-device-001",
+                    stateType: "Error",
+                    stateSeverity: "Error",
+                    stateCode: 567,
+                    logDateTime: new Date().toISOString(),
+                    text: "Demo Error: Inverter communication timeout",
+                  },
+                ]
+              : [];
+
+          return {
+            ...system,
+            status: newStatus,
+            isActive: newStatus !== "offline",
+            errorMessages: mockErrorMessages,
+          };
+        }
+        return system;
+      });
+
+      // Also update the filtered systems state
+      setFilteredSystems((currentFiltered) => {
+        return currentFiltered.map((system) => {
+          const updatedSystem = updatedSystems.find((s) => s.id === system.id);
+          return updatedSystem || system;
+        });
+      });
+
+      return updatedSystems;
+    });
+  };
+
   return (
     <SafeAreaView
       style={[
@@ -691,14 +966,44 @@ export default function DashboardScreen() {
           style={{ color: colors.text, fontWeight: "700" }}
         >
           Solar Systems
+          {demoMode && (
+            <Text
+              variant="titleSmall"
+              style={{ color: "#FF9800", fontWeight: "400" }}
+            >
+              {" "}
+              (Demo Mode)
+            </Text>
+          )}
+          {currentUser &&
+            currentUser.role !== "admin" &&
+            accessibleSystemIds.length > 0 && (
+              <Text
+                variant="titleSmall"
+                style={{ color: colors.primary, fontWeight: "400" }}
+              >
+                {" "}
+                (Restricted Access)
+              </Text>
+            )}
         </Text>
-        <IconButton
-          icon="refresh"
-          iconColor={colors.primary}
-          size={24}
-          onPress={onRefresh}
-          disabled={refreshing}
-        />
+        <View style={styles.headerButtons}>
+          {/* Demo Mode Toggle Button */}
+          <IconButton
+            icon={demoMode ? "bug" : "bug-outline"}
+            iconColor={demoMode ? "#FF9800" : colors.primary}
+            size={24}
+            onPress={toggleDemoMode}
+            style={{ marginRight: -8 }}
+          />
+          <IconButton
+            icon="refresh"
+            iconColor={colors.primary}
+            size={24}
+            onPress={onRefresh}
+            disabled={refreshing}
+          />
+        </View>
       </View>
 
       {/* Search Bar */}
@@ -821,6 +1126,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginTop: 8,
   },
   searchContainer: {
     flexDirection: "row",
@@ -1001,5 +1307,30 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 12,
     color: "#888",
+  },
+  warningIcon: {
+    marginRight: 8,
+  },
+  demoIndicator: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    backgroundColor: "#FF9800",
+    borderBottomLeftRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    zIndex: 10,
+  },
+  demoText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+  headerButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  cardContentContainer: {
+    paddingTop: 12,
   },
 });

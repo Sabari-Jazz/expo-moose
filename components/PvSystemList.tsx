@@ -200,7 +200,7 @@ export default function PvSystemList() {
                     <Image
                       source={{ uri: item.pictureURL }}
                       style={styles.image}
-                      contentFit="cover"
+                      resizeMode="cover"
                     />
                   ) : (
                     <View style={styles.placeholderImage}>
@@ -279,6 +279,7 @@ const styles = StyleSheet.create({
     paddingRight: 4,
   },
   card: {
+    marginTop: 16,
     marginBottom: 16,
   },
   cardContent: {

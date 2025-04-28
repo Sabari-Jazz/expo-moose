@@ -9,13 +9,13 @@ import {
   ScrollView,
   TouchableOpacity,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router"; 
-import * as api from "@/api/api"; 
-import { ThemedView } from "./ThemedView"; 
-import { ThemedText } from "./ThemedText"; 
+import { useLocalSearchParams, useRouter } from "expo-router";
+import * as api from "@/api/api";
+import { ThemedView } from "./ThemedView";
+import { ThemedText } from "./ThemedText";
 import { useThemeColor } from "@/hooks/useThemeColor";
 import { Stack } from "expo-router";
-import { LocalIonicon } from "./ui/LocalIonicon"; 
+import { LocalIonicon } from "./ui/LocalIonicon";
 
 // Helper to find a specific channel value
 const findChannelValue = (
@@ -33,7 +33,7 @@ const findChannelValue = (
 const formatDateTime = (isoString: string | null | undefined): string => {
   if (!isoString) return "N/A";
   try {
-    return new Date(isoString).toLocaleString(); 
+    return new Date(isoString).toLocaleString();
   } catch (e) {
     return "Invalid Date";
   }
@@ -267,7 +267,7 @@ export default function PvSystemDetailScreen() {
               <Image
                 source={{ uri: pvSystemDetails.pictureURL }}
                 style={styles.heroImage}
-                contentFit="cover"
+                resizeMode="cover"
               />
             ) : (
               <View

@@ -576,7 +576,7 @@ export const getPvSystemMessages = async (
         throw error;
     }
 };
-
+// TODO: COMPLETE WEATHER CHANNELS
 export const getCurrentWeather = async (
     pvSystemId: string, params: WeatherParams = {}
 ): Promise<CurrentWeatherResponse | null> => {
