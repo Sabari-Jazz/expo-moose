@@ -15,7 +15,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useThemeColor } from "@/hooks/useThemeColor";
 import { uploadFeedback } from "@/services/feedbackService";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 
 export default function FeedbackScreen() {
@@ -101,6 +101,7 @@ export default function FeedbackScreen() {
   };
 
   return (
+    <SafeAreaView style={styles.container}>
     <ThemedView style={styles.container}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -230,6 +231,7 @@ export default function FeedbackScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </ThemedView>
+    </SafeAreaView>
   );
 }
 
@@ -244,7 +246,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   formContainer: {
-    marginVertical: 16,
+    marginVertical: 10,
   },
   title: {
     fontWeight: "bold",

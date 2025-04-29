@@ -28,7 +28,6 @@ import { getCurrentUser, hasSystemAccess } from "@/utils/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LocalIonicon } from "@/components/ui/LocalIonicon";
 import { LineChart, BarChart } from "react-native-chart-kit";
-
 const findChannelValue = (
   channels:
     | api.FlowDataChannel[]
@@ -138,6 +137,8 @@ export default function PvSystemDetailScreen() {
 
   // Dashboard flatlist ref for programmatic scrolling
   const dashboardFlatListRef = useRef<FlatList>(null);
+
+  const [dashboardSectionWidth, setDashboardSectionWidth] = useState<number>(Dimensions.get('window').width);
 
   // Check if user has access to this system
   useEffect(() => {
@@ -842,7 +843,7 @@ export default function PvSystemDetailScreen() {
     return (
       <View
         style={{
-          width: Dimensions.get("window").width - 32,
+          width: dashboardSectionWidth,
           paddingHorizontal: 5,
         }}
       >
@@ -1300,6 +1301,7 @@ export default function PvSystemDetailScreen() {
   // Simplified Energy Chart Component that works for all time periods
   const EnergyChart = () => {
     const screenWidth = Dimensions.get("window").width - 40; // Accounting for margins
+    const [energySectionWidth, setEnergySectionWidth] = useState<number | null>(null);
 
     if (chartLoading) {
       return (
@@ -1449,13 +1451,19 @@ export default function PvSystemDetailScreen() {
         : "Yearly Energy Production (kWh)";
 
     return (
-      <View style={styles.chartContainer}>
+      <View style={styles.chartContainer}
+      onLayout={(event) => {
+        const { width } = event.nativeEvent.layout;
+        setEnergySectionWidth(width);
+      }}
+      >
         <View style={styles.chartHeader}>
           <ThemedText style={styles.chartTitle}>{chartTitle}</ThemedText>
           </View>
+          {energySectionWidth !== null && (
         <LineChart
           data={chartData}
-          width={screenWidth}
+          width={energySectionWidth}
           height={220}
           chartConfig={chartConfig}
           bezier
@@ -1468,6 +1476,7 @@ export default function PvSystemDetailScreen() {
           segments={5}
           yAxisInterval={1}
         />
+          )}
       </View>
     );
   };
@@ -1664,6 +1673,10 @@ export default function PvSystemDetailScreen() {
             styles.section,
             { backgroundColor: isDarkMode ? colors.card : "#fff", padding: 16 },
           ]}
+          onLayout={(event) => {
+            const { width } = event.nativeEvent.layout;
+            setDashboardSectionWidth(width - 32);
+          }}
         >
           <ThemedText style={styles.sectionTitle}>System Dashboard</ThemedText>
 
@@ -1678,6 +1691,11 @@ export default function PvSystemDetailScreen() {
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
+            snapToInterval={dashboardSectionWidth}
+            snapToAlignment="start"
+            decelerationRate={0.3}
+            contentContainerStyle={{width: dashboardSectionWidth  * dashboardData.length }}
+            bounces={false}
             onMomentumScrollEnd={(event) => {
               const contentOffset = event.nativeEvent.contentOffset;
               const viewSize = event.nativeEvent.layoutMeasurement;

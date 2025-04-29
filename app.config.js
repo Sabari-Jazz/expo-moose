@@ -130,7 +130,7 @@ export default {
     extra: {
       // Expose environment variables to the app
       // Ensure the .env file is correctly loaded above or variables are set via EAS Secrets / CI
-      googleMapsApiKey: process.env.Maps_API_KEY,
+      googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
       solarWebAccessKeyId: process.env.SOLAR_WEB_ACCESS_KEY_ID,
       solarWebAccessKeyValue: process.env.SOLAR_WEB_ACCESS_KEY_VALUE,
       solarWebUserId: process.env.SOLAR_WEB_USERID,
