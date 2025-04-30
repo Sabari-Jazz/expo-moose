@@ -14,7 +14,7 @@ import {
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useThemeColor } from "@/hooks/useThemeColor";
-import { uploadFeedback } from "@/services/feedbackService";
+import { uploadFeedback, uploadFeedbackSupabase } from "@/services/feedbackService";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 
@@ -24,6 +24,7 @@ export default function FeedbackScreen() {
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [lastTicketId, setLastTicketId] = useState<string | null>(null);
+  const [feedbackType, setFeedbackType] = useState<'bug' | 'feature'>('bug');
 
   const primaryColor = useThemeColor({}, "tint");
   const backgroundColor = useThemeColor({}, "background");
@@ -60,10 +61,13 @@ export default function FeedbackScreen() {
         name: name.trim(),
         email: email.trim(),
         message: message.trim(),
+        type: feedbackType,
+        supabaseId: ''
       };
 
       // Call the upload function
-      const result = await uploadFeedback(feedbackData);
+      const result = await uploadFeedbackSupabase(feedbackData); 
+     // const result = await uploadFeedback(feedbackData);
       setLastTicketId(result.ticketId);
 
       console.log("Feedback saved successfully:", result.ticketId);
@@ -80,6 +84,7 @@ export default function FeedbackScreen() {
               setName("");
               setEmail("");
               setMessage("");
+              setFeedbackType('bug');
             },
           },
         ]
@@ -204,7 +209,49 @@ export default function FeedbackScreen() {
                 textAlignVertical="top"
               />
             </View>
-
+            <View style={styles.inputContainer}>
+            <ThemedText type="caption" style={styles.label}>
+              Feedback Type
+            </ThemedText>
+            <View style={styles.toggleWrapper}>
+              <View style={styles.toggleContainer}>
+                <View style={styles.labelRow}>
+                  <View style={styles.labelColumn}>
+                    <ThemedText style={[styles.toggleLabel, feedbackType === "bug" && styles.activeLabel]}>
+                      Bug
+                    </ThemedText>
+                    <ThemedText style={[styles.toggleLabel, feedbackType === "bug" && styles.activeLabel]}>
+                      Report
+                    </ThemedText>
+                  </View>
+                  <View style={styles.labelColumn}>
+                    <ThemedText style={[styles.toggleLabel, feedbackType === "feature" && styles.activeLabel]}>
+                      Feature
+                    </ThemedText>
+                    <ThemedText style={[styles.toggleLabel, feedbackType === "feature" && styles.activeLabel]}>
+                      Request
+                    </ThemedText>
+                  </View>
+                </View>
+      <TouchableOpacity
+        style={[
+          styles.toggleTrack,
+          { borderColor: primaryColor }
+        ]}
+        activeOpacity={0.8}
+        onPress={() => setFeedbackType(feedbackType === "feature" ? "bug" : "feature")}
+      >
+        <View
+          style={[
+            styles.toggleThumb,
+            { backgroundColor: primaryColor },
+            feedbackType === "feature" && styles.toggleThumbRight
+          ]}
+        />
+      </TouchableOpacity>
+    </View>
+  </View>
+</View>
             <TouchableOpacity
               style={[styles.submitButton, { backgroundColor: primaryColor }]}
               onPress={handleSubmit}
@@ -288,6 +335,60 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 12,
     textAlignVertical: "top",
+  },
+  toggleWrapper: {
+    marginVertical: 8,
+    alignItems: "flex-start",
+  },
+  toggleContainer: {
+    alignItems: "center",
+    width: 120, // Fixed width for the toggle component
+  },
+  labelRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 8,
+    width: "100%",
+    gap:40,
+  },
+  labelColumn: {
+    alignItems: "center",
+    
+  },
+  toggleLabel: {
+    fontSize: 14,
+    fontWeight: "bold",
+    opacity: 0.7,
+    textAlign: "center",
+    
+  },
+  
+  activeLabel: {
+    opacity: 1,
+    fontWeight: "600",
+  },
+  toggleTrack: {
+    height: 28,
+    width: 90,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    padding: 2,
+    backgroundColor: "transparent",
+  },
+  toggleThumb: {
+    width: 46,
+    height: 22,
+    borderRadius: 11,
+    position: "relative",
+    left: 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1,
+    elevation: 2,
+  },
+  toggleThumbRight: {
+    left: 38,
   },
   submitButton: {
     height: 50,

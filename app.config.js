@@ -136,6 +136,8 @@ export default {
       solarWebUserId: process.env.SOLAR_WEB_USERID,
       solarWebPassword: process.env.SOLAR_WEB_PASSWORD,
       apiBaseUrl: process.env.API_BASE_URL,
+      supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL2,
+      supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY2,
       // EAS Project ID (using the one from app.config.js)
       eas: {
         projectId: "a6e0a3fc-5475-4e55-819f-8257b0ea3fb3",

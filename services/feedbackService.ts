@@ -1,5 +1,5 @@
 import { loadFeedbackFromStorage, saveFeedbackToStorage } from '../utils/localFeedbackStorage';
-
+import { supabase } from '@/utils/supabase';
 // Define the feedback item interface
 export interface FeedbackItem {
   ticketId: string;
@@ -7,6 +7,16 @@ export interface FeedbackItem {
   email: string;
   message: string;
   timestamp: number;
+  status: 'pending' | 'resolved';
+  type: string;
+  supabaseId: string;
+}
+
+export interface FeedbackItemSupabase {
+  name: string;
+  email: string;
+  message: string;
+  type: string;
   status: 'pending' | 'resolved';
 }
 
@@ -56,8 +66,11 @@ export const uploadFeedback = async (feedbackData: {
   name: string;
   email: string;
   message: string;
+  type: string;
+  supabaseId: string;
 }): Promise<{ ticketId: string }> => {
   try {
+    //console.log('inside', feedbackData.supabaseId)
     const ticketId = generateTicketId();
     
     // Create feedback item
@@ -67,7 +80,9 @@ export const uploadFeedback = async (feedbackData: {
       email: feedbackData.email,
       message: feedbackData.message,
       timestamp: Date.now(),
-      status: 'pending'
+      status: 'pending',
+      type: feedbackData.type,
+      supabaseId: feedbackData.supabaseId
     };
     
     // Add to local store
@@ -111,12 +126,18 @@ export const deleteFeedback = async (ticketId: string): Promise<boolean> => {
   try {
     // Remove from local store
     const initialLength = localFeedbackStore.length;
+    // get item
+    const item = localFeedbackStore.find(item => item.ticketId === ticketId);
     localFeedbackStore = localFeedbackStore.filter(item => item.ticketId !== ticketId);
     
     // Save updated list to AsyncStorage
     if (initialLength !== localFeedbackStore.length) {
       await saveFeedbackToStorage(localFeedbackStore);
       console.log(`Feedback with ID ${ticketId} deleted successfully`);
+      if(item) {
+        deleteFeedbackSupabase(item.supabaseId); // delete from supabase
+      }
+    
       return true;
     } else {
       console.log(`Feedback with ID ${ticketId} not found`);
@@ -143,8 +164,9 @@ export const updateFeedbackStatus = async (
     if (found) {
       found.status = status;
       
-      // Save the updated list
+      // Save the updated list to local and supabase
       await saveFeedbackToStorage(localFeedbackStore);
+      await updateFeedbackStatusSupabase(found.supabaseId, status);
       console.log(`Feedback ${ticketId} status updated to ${status}`);
       return true;
     } else {
@@ -157,3 +179,70 @@ export const updateFeedbackStatus = async (
     return false;
   }
 };
+// upload the entry to supabase 
+export async function uploadFeedbackSupabase(feedbackData: {
+  name: string;
+  email: string;
+  message: string;
+  type: string;
+  supabaseId: string;
+}) {
+  const feedbackItem: FeedbackItemSupabase = {
+    name: feedbackData.name,
+    email: feedbackData.email,
+    message: feedbackData.message,
+    type: feedbackData.type,
+    status: 'pending'
+  };
+  const { data, error } = await supabase
+    .from('feedback')
+    .insert([feedbackItem])
+    .select(); 
+
+  if (error) throw new Error(`Insert failed: ${error.message}`);
+  // upload into local
+  feedbackData['supabaseId'] = data[0].id
+  const result = await uploadFeedback(feedbackData)
+  return result;
+}
+// get all feedback from supabase
+export async function selectAllFeedback() {
+  const { data, error } = await supabase
+    .from('feedback')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(`Select failed: ${error.message}`);
+  return data;
+}
+//update feedback status in supabase
+export async function updateFeedbackStatusSupabase(
+  id: string,
+  status: 'pending' | 'resolved'
+) {
+  const { data, error } = await supabase
+    .from('feedback')
+    .update({ status: status})
+    .eq('id', id);
+
+  if (error) {
+    console.log('ID', id);
+    console.error('Error updating feedback:', error.message);
+    return null;
+  }
+
+  return data;
+}
+export async function deleteFeedbackSupabase(id: string) {
+  const { data, error } = await supabase
+    .from('feedback')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error deleting feedback:', error.message);
+    return null;
+  }
+
+  return data;
+}
