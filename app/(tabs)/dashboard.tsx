@@ -466,141 +466,149 @@ export default function DashboardScreen() {
   // Function to load a page of PV systems from the API
   const loadPvSystemsPage = async (page: number, showLoading = true) => {
     try {
-      if (showLoading) {
-        if (page === 0) {
-          setLoading(true);
-        } else {
-          setIsLoadingMore(true);
+      if(currentUser) {
+        if (showLoading) {
+          if (page === 0) {
+            setLoading(true);
+          } else {
+            setIsLoadingMore(true);
+          }
         }
-      }
 
-      const offset = page * SYSTEMS_PER_PAGE;
+        const offset = page * SYSTEMS_PER_PAGE;
 
-      // Fetch a page of PV systems with pagination parameters
-      const systemsData = await api.getPvSystems(offset, SYSTEMS_PER_PAGE);
+        // Fetch a page of PV systems with pagination parameters
+        let systemsData = await api.getPvSystems(offset);
 
-      if (!systemsData || systemsData.length === 0) {
-        if (page === 0) {
-          setError("No PV systems found");
+        if (!systemsData || systemsData.length === 0) {
+          if (page === 0) {
+            setError("No PV systems found");
+          }
+          setHasMorePages(false);
+          setLoading(false);
+          setIsLoadingMore(false);
+          return;
         }
-        setHasMorePages(false);
-        setLoading(false);
-        setIsLoadingMore(false);
-        return;
-      }
+        
 
-      console.log(`Fetched ${systemsData.length} PV systems for page ${page}`);
+        console.log(`Fetched ${systemsData.length} PV systems for page ${page}`);
 
-      // Filter systems based on user access
-      const accessibleSystemsData =
-        currentUser?.role === "admin" || accessibleSystemIds.length === 0
-          ? systemsData
-          : systemsData.filter((system) =>
-              hasAccessToSystem(system.pvSystemId)
-            );
+        // Filter systems based on user access
+        const accessibleSystemsData =
+          currentUser?.role === "admin" 
+            ? systemsData
+            : systemsData.filter((system) =>
+                hasAccessToSystem(system.pvSystemId)
+              );
+        const displayData = accessibleSystemsData.slice(offset, (page + 1) * SYSTEMS_PER_PAGE);
 
-      console.log(
-        `User has access to ${accessibleSystemsData.length} of the ${systemsData.length} systems`
-      );
+        console.log(
+          `User ${currentUser?.name} has access to ${accessibleSystemsData.length} of the ${systemsData.length} systems`
+        );
 
-      // Check if we have more pages - only if the full page was returned and the user has access to all of them
-      setHasMorePages(
-        systemsData.length === SYSTEMS_PER_PAGE &&
-          accessibleSystemsData.length > 0
-      );
+        // Check if we have more pages - only if the full page was returned and the user has access to all of them
+       /* setHasMorePages(
+          systemsData.length === SYSTEMS_PER_PAGE &&
+            accessibleSystemsData.length > 0
+        );
+        */
+       
+       setHasMorePages(accessibleSystemsData.length > (page + 1) * SYSTEMS_PER_PAGE);
 
-      // Create an array to hold system metadata for this page
-      const enhancedSystems = await Promise.all(
-        accessibleSystemsData.map(async (system) => {
-          let flowData: api.FlowDataResponse | null = null;
-          let aggrToday: api.AggregatedDataResponse | null = null;
-          let errorMessages: SystemMessage[] = [];
+        // Create an array to hold system metadata for this page
+        const enhancedSystems = await Promise.all(
+          displayData.map(async (system) => {
+            let flowData: api.FlowDataResponse | null = null;
+            let aggrToday: api.AggregatedDataResponse | null = null;
+            let errorMessages: SystemMessage[] = [];
 
-          try {
-            // Fetch flow data for current power and status
-            flowData = await api.getPvSystemFlowData(system.pvSystemId);
-
-            // Fetch aggregated data for today's energy production
-            aggrToday = await api.getPvSystemAggregatedData(system.pvSystemId, {
-              from: getShortDateString(new Date()),
-              duration: 1,
-            });
-
-            // Fetch error messages from the last 24 hours
             try {
-              const fromDate = new Date();
-              fromDate.setDate(fromDate.getDate() - 1); // Go back 1 day
+              // Fetch flow data for current power and status
+              console.log('inside loop')
+              flowData = await api.getPvSystemFlowData(system.pvSystemId);
 
-              // Use the correctly formatted date string
-              const formattedFromDate = formatApiDateString(fromDate);
-
-              errorMessages = await api.getPvSystemMessages(system.pvSystemId, {
-                from: formattedFromDate,
-                stateseverity: "Error",
-                limit: 5, // Limit to the most recent 5 errors
+              // Fetch aggregated data for today's energy production
+              aggrToday = await api.getPvSystemAggregatedData(system.pvSystemId, {
+                from: getShortDateString(new Date()),
+                duration: 1,
               });
 
-              if (errorMessages.length > 0) {
-                console.log(
-                  `System ${system.pvSystemId} has ${errorMessages.length} error messages`
+              // Fetch error messages from the last 24 hours
+              try {
+                const fromDate = new Date();
+                fromDate.setDate(fromDate.getDate() - 1); // Go back 1 day
+
+                // Use the correctly formatted date string
+                const formattedFromDate = formatApiDateString(fromDate);
+
+                errorMessages = await api.getPvSystemMessages(system.pvSystemId, {
+                  from: formattedFromDate,
+                  stateseverity: "Error",
+                  limit: 5, // Limit to the most recent 5 errors
+                });
+
+                if (errorMessages.length > 0) {
+                  console.log(
+                    `System ${system.pvSystemId} has ${errorMessages.length} error messages`
+                  );
+                }
+              } catch (msgErr) {
+                console.warn(
+                  `Failed to fetch error messages for ${system.pvSystemId}:`,
+                  msgErr
                 );
               }
-            } catch (msgErr) {
-              console.warn(
-                `Failed to fetch error messages for ${system.pvSystemId}:`,
-                msgErr
+
+              // Format system data with flow data, aggregated data, and error messages
+              return formatPvSystemData(
+                system,
+                flowData,
+                aggrToday,
+                errorMessages
+              );
+            } catch (err) {
+              console.error(
+                `Error fetching data for system ${system.pvSystemId}:`,
+                err
+              );
+              // Return basic system data without flow data
+              return formatPvSystemData(
+                system,
+                flowData,
+                aggrToday,
+                errorMessages
               );
             }
+          })
+        );
 
-            // Format system data with flow data, aggregated data, and error messages
-            return formatPvSystemData(
-              system,
-              flowData,
-              aggrToday,
-              errorMessages
-            );
-          } catch (err) {
-            console.error(
-              `Error fetching data for system ${system.pvSystemId}:`,
-              err
-            );
-            // Return basic system data without flow data
-            return formatPvSystemData(
-              system,
-              flowData,
-              aggrToday,
-              errorMessages
-            );
-          }
-        })
-      );
+        // Sort by status (active first) then by name
+        const sortedSystems = enhancedSystems.sort((a, b) => {
+          // Sort active systems first
+          if (a.isActive && !b.isActive) return -1;
+          if (!a.isActive && b.isActive) return 1;
 
-      // Sort by status (active first) then by name
-      const sortedSystems = enhancedSystems.sort((a, b) => {
-        // Sort active systems first
-        if (a.isActive && !b.isActive) return -1;
-        if (!a.isActive && b.isActive) return 1;
+          // Then sort alphabetically by name
+          return a.name.localeCompare(b.name);
+        });
 
-        // Then sort alphabetically by name
-        return a.name.localeCompare(b.name);
-      });
-
-      // Update state with loaded systems
-      setPvSystems((prevSystems) =>
-        page === 0 ? sortedSystems : [...prevSystems, ...sortedSystems]
-      );
-
-      if (searchQuery.trim()) {
-        applySearchFilter(searchQuery);
-      } else {
-        setFilteredSystems((prevSystems) =>
+        // Update state with loaded systems
+        setPvSystems((prevSystems) =>
           page === 0 ? sortedSystems : [...prevSystems, ...sortedSystems]
         );
-      }
 
-      setCurrentPage(page);
-      setLoading(false);
-      setIsLoadingMore(false);
+        if (searchQuery.trim()) {
+          applySearchFilter(searchQuery);
+        } else {
+          setFilteredSystems((prevSystems) =>
+            page === 0 ? sortedSystems : [...prevSystems, ...sortedSystems]
+          );
+        }
+
+        setCurrentPage(page);
+        setLoading(false);
+        setIsLoadingMore(false);
+    }
     } catch (error) {
       console.error("Error loading PV systems:", error);
       setError("Failed to load PV systems. Please try again.");
@@ -620,7 +628,7 @@ export default function DashboardScreen() {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     setCurrentPage(0);
-    setHasMorePages(true);
+   // setHasMorePages(true);
     loadPvSystemsPage(0, false).finally(() => {
       setRefreshing(false);
     });
@@ -705,7 +713,7 @@ export default function DashboardScreen() {
                     <View style={styles.statusChipContainer}>
                       {item.status === "warning" && (
                         <Ionicons
-                          // name="warning"
+                          name="warning"
                           size={16}
                           color="#FF9800"
                           style={styles.warningIcon}
