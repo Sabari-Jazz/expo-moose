@@ -9,7 +9,7 @@ import {
   Platform,
 } from "react-native";
 import MapView, { Marker, Callout, PROVIDER_GOOGLE } from "react-native-maps";
-import { getPvSystems } from "@/api/api";
+import { getPvSystems, getPvSystemFlowData } from "@/api/api";
 import { PvSystem } from "./PvSystemList";
 import {
   geocodeAddress,
@@ -108,7 +108,11 @@ export default function PvSystemMap({
       params: { pvSystemId },
     });
   };
-
+  // get boolean status of system
+  const getStatus = async(system: PvSystem) => {
+    const data = await getPvSystemFlowData(system.pvSystemId);
+    return data.status.isOnline;
+  }
   // Fetch data from API
   const fetchData = async () => {
     try {
@@ -132,6 +136,7 @@ export default function PvSystemMap({
 
             // First try to get coordinates directly from the system data
             const existingCoords = getCoordinatesFromSystem(system);
+            const systemStatus = await getStatus(system);
             if (existingCoords) {
               console.log(
                 `Using existing coordinates for system ${
@@ -177,11 +182,13 @@ export default function PvSystemMap({
 
             // Determine system status based on API data
             // In a real app, this would come from the API
-            let status: "online" | "warning" | "offline" = "online";
+          //  let status: "online" | "warning" | "offline" = "online";
 
-            // For now we'll set a default, but this should be replaced with actual status from API
-            if (system.status) {
-              status = system.status as "online" | "warning" | "offline";
+            // Set status as offline or online
+            let status = "offline";
+            if (systemStatus == true) {
+          //    status = systemStatus as "online" | "warning" | "offline";
+              status = "online"
             }
 
             return { ...system, coords, status };
@@ -194,7 +201,7 @@ export default function PvSystemMap({
 
       // Filter out systems without coordinates
       const validSystems = systemsWithCoords.filter(
-        (system): system is PvSystemWithCoords => system !== null
+        (system): system is PvSystemWithCoords => system !== null && system.coords !== undefined
       );
 
       console.log(
