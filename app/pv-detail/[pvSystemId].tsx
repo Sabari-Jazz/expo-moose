@@ -82,6 +82,7 @@ export default function PvSystemDetailScreen() {
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
+  const [activeTab, setActiveTab] = useState('overview');
 
   // State for all fetched data
   const [pvSystemDetails, setPvSystemDetails] =
@@ -933,7 +934,7 @@ export default function PvSystemDetailScreen() {
           styles.safeArea,
           { backgroundColor: isDarkMode ? colors.background : "#f5f5f5" },
         ]}
-        edges={["top", "left", "right"]}
+        edges={["left", "right"]}
       >
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -955,7 +956,7 @@ export default function PvSystemDetailScreen() {
           styles.safeArea,
           { backgroundColor: isDarkMode ? colors.background : "#f5f5f5" },
         ]}
-        edges={["top", "left", "right"]}
+        edges={["left", "right"]}
       >
         <View style={styles.centered}>
           <ThemedText style={styles.errorText}>{error}</ThemedText>
@@ -1301,7 +1302,9 @@ export default function PvSystemDetailScreen() {
   // Simplified Energy Chart Component that works for all time periods
   const EnergyChart = () => {
     const screenWidth = Dimensions.get("window").width - 40; // Accounting for margins
-    const [energySectionWidth, setEnergySectionWidth] = useState<number | null>(null);
+    const screenHeight = Dimensions.get('window').height;
+    const [energySectionWidth, setEnergySectionWidth] = useState<number>(0);
+    const [energySectionHeight, setEnergySectionHeight] = useState<number>(0);
 
     if (chartLoading) {
       return (
@@ -1453,8 +1456,9 @@ export default function PvSystemDetailScreen() {
     return (
       <View style={styles.chartContainer}
       onLayout={(event) => {
-        const { width } = event.nativeEvent.layout;
+        const { width, height } = event.nativeEvent.layout;
         setEnergySectionWidth(width);
+        setEnergySectionHeight(height)
       }}
       >
         <View style={styles.chartHeader}>
@@ -1464,7 +1468,7 @@ export default function PvSystemDetailScreen() {
         <LineChart
           data={chartData}
           width={energySectionWidth}
-          height={220}
+          height={screenHeight * 0.5}
           chartConfig={chartConfig}
           bezier
           style={styles.chart}
@@ -1567,6 +1571,45 @@ export default function PvSystemDetailScreen() {
       </Animated.View>
     );
   };
+  const TopNavigationBar = ({ 
+    activeTab, 
+    setActiveTab 
+  }: { 
+    activeTab: 'overview' | 'performance' | 'system', 
+    setActiveTab: React.Dispatch<React.SetStateAction<'overview' | 'performance' | 'system'>> 
+  }) => {
+   
+    
+    const tabs = [
+      { id: 'overview', label: 'Overview' },
+      { id: 'performance', label: 'Performance' },
+      { id: 'system', label: 'System Details' },
+    ];
+    
+    return (
+      <View style={[styles.navBarContainer, { backgroundColor: isDarkMode ? colors.card : '#fff' }]}>
+        {tabs.map((tab) => (
+          <TouchableOpacity
+            key={tab.id}
+            style={[
+              styles.navTab,
+              activeTab === tab.id && { borderBottomColor: colors.primary, borderBottomWidth: 2 }
+            ]}
+            onPress={() => setActiveTab(tab.id as 'overview' | 'performance' | 'system')}
+          >
+            <ThemedText 
+              style={[
+                styles.navTabText, 
+                activeTab === tab.id && { color: colors.primary, fontWeight: '600' }
+              ]}
+            >
+              {tab.label}
+            </ThemedText>
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  };
 
   // --- Render Dashboard ---
   return (
@@ -1575,17 +1618,29 @@ export default function PvSystemDetailScreen() {
         styles.safeArea,
         { backgroundColor: isDarkMode ? colors.background : "#f5f5f5" },
       ]}
-      edges={["top", "left", "right"]}
+      edges={["left", "right"]}
     >
       {/* Configure Header Title Dynamically */}
       <Stack.Screen
         options={{
+          headerShown: true,
           title: pvSystemDetails.name || "System Details",
           headerStyle: {
             backgroundColor: isDarkMode ? colors.background : "#f5f5f5",
           },
-          headerShadowVisible: false,
+          contentStyle: { 
+            paddingBottom: 0,
+          },
+          headerShadowVisible: true,
           headerTintColor: colors.text,
+          headerLeft: () => (
+            <TouchableOpacity
+              onPress={() => router.push("/dashboard")}
+              style={{ marginLeft: 16, padding: 4 }}
+            >
+              <Ionicons name="arrow-back" size={24} color={colors.text} />
+            </TouchableOpacity>
+          ),
           headerRight: () =>
             demoMode ? (
               <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -1613,6 +1668,9 @@ export default function PvSystemDetailScreen() {
             ),
         }}
       />
+      {/* Add the Navigation Bar */}
+      <TopNavigationBar activeTab={activeTab as 'overview' | 'performance' | 'system'} setActiveTab={setActiveTab as React.Dispatch<React.SetStateAction<'overview' | 'performance' | 'system'>>}   />
+      
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -1625,14 +1683,21 @@ export default function PvSystemDetailScreen() {
           />
         }
       >
-        {/* --- Header --- */}
+        
+
+        {/* OVERVIEW TAB CONTENT */}
+        {activeTab === 'overview' && (
+          <>
+            {/* System Dashboard Section */}
+            {/* Header with status indicator - keep this visible on all tabs */}
         <Animated.View entering={FadeInDown.springify()}>
           <View style={styles.header}>
-            <View style={styles.statusContainer}>
+            <View style={[styles.statusContainer, {marginTop: 15}]}>
               <View
                 style={[
                   styles.statusIndicator,
                   { backgroundColor: systemStatusColor },
+                  
                 ]}
               />
               <ThemedText style={styles.statusText}>
@@ -1641,7 +1706,7 @@ export default function PvSystemDetailScreen() {
             </View>
           </View>
 
-          {/* --- Image --- */}
+          {/* Image - keep this visible on all tabs */}
           <View style={styles.imageContainer}>
             {pvSystemDetails.pictureURL ? (
               <Image
@@ -1665,330 +1730,343 @@ export default function PvSystemDetailScreen() {
             )}
           </View>
         </Animated.View>
-
-        {/* --- System Dashboard Section --- */}
-        <Animated.View
-          entering={FadeInUp.delay(100).springify()}
-          style={[
-            styles.section,
-            { backgroundColor: isDarkMode ? colors.card : "#fff", padding: 16 },
-          ]}
-          onLayout={(event) => {
-            const { width } = event.nativeEvent.layout;
-            setDashboardSectionWidth(width - 32);
-          }}
-        >
-          <ThemedText style={styles.sectionTitle}>System Dashboard</ThemedText>
-
-          {/* Period selector above the cards */}
-          <DashboardPeriodIndicator />
-
-          <FlatList
-            ref={dashboardFlatListRef}
-            data={dashboardData}
-            renderItem={renderDashboardCard}
-            keyExtractor={(item) => item.id}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            snapToInterval={dashboardSectionWidth}
-            snapToAlignment="start"
-            decelerationRate={0.3}
-            contentContainerStyle={{width: dashboardSectionWidth  * dashboardData.length }}
-            bounces={false}
-            onMomentumScrollEnd={(event) => {
-              const contentOffset = event.nativeEvent.contentOffset;
-              const viewSize = event.nativeEvent.layoutMeasurement;
-              const pageNum = Math.floor(contentOffset.x / viewSize.width);
-              setSelectedDashboardPeriod(
-                dashboardData[pageNum].id as "today" | "week" | "month" | "year"
-              );
-            }}
-          />
-        </Animated.View>
-
-        {/* Weather Widget */}
-        <WeatherWidget />
-
-        {/* Charts Section */}
-        <Animated.View
-          entering={FadeInUp.delay(250).springify()}
-          style={[
-            styles.section,
-            { backgroundColor: isDarkMode ? colors.card : "#fff" },
-          ]}
-        >
-          <ThemedText style={styles.sectionTitle}>
-            Performance Trends
-          </ThemedText>
-          <ChartPeriodSelector />
-
-          {/* Energy chart adapts based on selected period */}
-          <EnergyChart />
-        </Animated.View>
-
-        {/* --- Devices Section --- */}
-        <Animated.View
-          entering={FadeInUp.delay(300).springify()}
-          style={[
-            styles.section,
-            { backgroundColor: isDarkMode ? colors.card : "#fff" },
-          ]}
-        >
-          <View style={styles.sectionHeader}>
-            <ThemedText style={styles.sectionTitle}>Devices</ThemedText>
-            <TouchableOpacity
-              onPress={() => {
-                Alert.alert(
-                  "View All Devices",
-                  `Would navigate to all devices for ${
-                    pvSystemDetails?.name || "this system"
-                  }`,
-                  [{ text: "OK" }]
-                );
+            <Animated.View
+              entering={FadeInUp.delay(100).springify()}
+              style={[
+                styles.section,
+                { backgroundColor: isDarkMode ? colors.card : "#fff", padding: 16 },
+              ]}
+              onLayout={(event) => {
+                const { width } = event.nativeEvent.layout;
+                setDashboardSectionWidth(width - 32);
               }}
-              style={styles.viewAllButton}
             >
-              <ThemedText style={{ color: colors.primary }}>
-                View All
-              </ThemedText>
-              <Ionicons
-                name="chevron-forward"
-                size={14}
-                color={colors.primary}
+              
+              <ThemedText style={styles.sectionTitle}>System Dashboard</ThemedText>
+
+              {/* Period selector above the cards */}
+              <DashboardPeriodIndicator />
+
+              <FlatList
+                ref={dashboardFlatListRef}
+                data={dashboardData}
+                renderItem={renderDashboardCard}
+                keyExtractor={(item) => item.id}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                snapToInterval={dashboardSectionWidth}
+                snapToAlignment="start"
+                decelerationRate={0.3}
+                contentContainerStyle={{width: dashboardSectionWidth * dashboardData.length }}
+                bounces={false}
+                onMomentumScrollEnd={(event) => {
+                  const contentOffset = event.nativeEvent.contentOffset;
+                  const viewSize = event.nativeEvent.layoutMeasurement;
+                  const pageNum = Math.floor(contentOffset.x / viewSize.width);
+                  setSelectedDashboardPeriod(
+                    dashboardData[pageNum].id as "today" | "week" | "month" | "year"
+                  );
+                }}
               />
-            </TouchableOpacity>
-          </View>
+            </Animated.View>
 
-          {devices.length > 0 ? (
-            <View>
-              {devices.slice(0, 3).map((device, index) => (
-                <DeviceCard
-                  key={device.deviceId}
-                  device={device}
-                  index={index}
-                />
-              ))}
+            {/* Weather Widget */}
+            <WeatherWidget />
+          </>
+        )}
 
-              {devices.length > 3 && (
-                <ThemedText style={styles.moreDevicesText}>
-                  {devices.length - 3} more devices available
+        {/* PERFORMANCE TAB CONTENT */}
+        {activeTab === 'performance' && (
+          <>
+            {/* Charts Section */}
+            <Animated.View
+              entering={FadeInUp.delay(100).springify()}
+              style={[
+                styles.section,
+                { backgroundColor: isDarkMode ? colors.card : "#fff" },
+                {marginTop: 15}
+              ]}
+            >
+              <ThemedText style={styles.sectionTitle}>
+                Performance Trends
+              </ThemedText>
+              <ChartPeriodSelector />
+
+              {/* Energy chart adapts based on selected period */}
+              <EnergyChart />
+            </Animated.View>
+          </>
+        )}
+
+        {/* SYSTEM DETAILS TAB CONTENT */}
+        {activeTab === 'system' && (
+          <>
+            {/* Devices Section */}
+            <Animated.View
+              entering={FadeInUp.delay(100).springify()}
+              style={[
+                styles.section,
+                { backgroundColor: isDarkMode ? colors.card : "#fff" },
+                {marginTop: 15}
+              ]}
+            >
+              <View style={styles.sectionHeader}>
+                <ThemedText style={styles.sectionTitle}>Devices</ThemedText>
+                <TouchableOpacity
+                  onPress={() => {
+                    Alert.alert(
+                      "View All Devices",
+                      `Would navigate to all devices for ${
+                        pvSystemDetails?.name || "this system"
+                      }`,
+                      [{ text: "OK" }]
+                    );
+                  }}
+                  style={styles.viewAllButton}
+                >
+                  <ThemedText style={{ color: colors.primary }}>
+                    View All
+                  </ThemedText>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={14}
+                    color={colors.primary}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {devices.length > 0 ? (
+                <View>
+                  {devices.slice(0, 3).map((device, index) => (
+                    <DeviceCard
+                      key={device.deviceId}
+                      device={device}
+                      index={index}
+                    />
+                  ))}
+
+                  {devices.length > 3 && (
+                    <ThemedText style={styles.moreDevicesText}>
+                      {devices.length - 3} more devices available
+                    </ThemedText>
+                  )}
+                </View>
+              ) : (
+                <ThemedText style={styles.noDataText}>
+                  No devices found for this system.
                 </ThemedText>
               )}
-            </View>
-          ) : (
-            <ThemedText style={styles.noDataText}>
-              No devices found for this system.
-            </ThemedText>
-          )}
-        </Animated.View>
+            </Animated.View>
 
-        {/* --- Maintenance Log Section --- */}
-        <Animated.View
-          entering={FadeInUp.delay(400).springify()}
-          style={[
-            styles.section,
-            { backgroundColor: isDarkMode ? colors.card : "#fff" },
-          ]}
-        >
-          <ThemedText style={styles.sectionTitle}>Maintenance Log</ThemedText>
-          <ThemedText style={styles.noDataText}>
-            Maintenance logs are not available for this system at the moment.
-          </ThemedText>
-        </Animated.View>
-
-        {/* --- Basic System Info Section --- */}
-        <Animated.View
-          entering={FadeInUp.delay(500).springify()}
-          style={[
-            styles.section,
-            { backgroundColor: isDarkMode ? colors.card : "#fff" },
-          ]}
-        >
-          <ThemedText style={styles.sectionTitle}>
-            System Information
-          </ThemedText>
-          <View style={styles.infoItem}>
-            <ThemedText style={styles.infoLabel}>ID:</ThemedText>
-            <ThemedText style={styles.infoValue}>
-              {pvSystemDetails.pvSystemId}
-            </ThemedText>
-          </View>
-          <View style={styles.infoItem}>
-            <ThemedText style={styles.infoLabel}>Installation:</ThemedText>
-            <ThemedText style={styles.infoValue}>
-              {formatDate(pvSystemDetails.installationDate)}
-            </ThemedText>
-          </View>
-          <View style={styles.infoItem}>
-            <ThemedText style={styles.infoLabel}>Last Import:</ThemedText>
-            <ThemedText style={styles.infoValue}>
-              {formatDateTime(pvSystemDetails.lastImport)}
-            </ThemedText>
-          </View>
-          <View style={styles.infoItem}>
-            <ThemedText style={styles.infoLabel}>Time Zone:</ThemedText>
-            <ThemedText style={styles.infoValue}>
-              {pvSystemDetails.timeZone}
-            </ThemedText>
-          </View>
-        </Animated.View>
-
-        {/* --- Location Section --- */}
-        <Animated.View
-          entering={FadeInUp.delay(600).springify()}
-          style={[
-            styles.section,
-            { backgroundColor: isDarkMode ? colors.card : "#fff" },
-          ]}
-        >
-          <ThemedText style={styles.sectionTitle}>Location</ThemedText>
-          <View style={styles.infoItem}>
-            <ThemedText style={styles.infoLabel}>Street:</ThemedText>
-            <ThemedText style={styles.infoValue}>
-              {pvSystemDetails.address.street ?? "N/A"}
-            </ThemedText>
-          </View>
-          <View style={styles.infoItem}>
-            <ThemedText style={styles.infoLabel}>City:</ThemedText>
-            <ThemedText style={styles.infoValue}>
-              {pvSystemDetails.address.city ?? "N/A"}
-            </ThemedText>
-          </View>
-          <View style={styles.infoItem}>
-            <ThemedText style={styles.infoLabel}>Zip Code:</ThemedText>
-            <ThemedText style={styles.infoValue}>
-              {pvSystemDetails.address.zipCode ?? "N/A"}
-            </ThemedText>
-          </View>
-          <View style={styles.infoItem}>
-            <ThemedText style={styles.infoLabel}>State:</ThemedText>
-            <ThemedText style={styles.infoValue}>
-              {pvSystemDetails.address.state ?? "N/A"}
-            </ThemedText>
-          </View>
-          <View style={styles.infoItem}>
-            <ThemedText style={styles.infoLabel}>Country:</ThemedText>
-            <ThemedText style={styles.infoValue}>
-              {pvSystemDetails.address.country ?? "N/A"}
-            </ThemedText>
-          </View>
-        </Animated.View>
-
-        {/* --- Error Messages Section (Conditional) --- */}
-        {(latestErrorMessages.length > 0 || demoMode) && (
-          <ThemedView
-            type="card"
-            style={[styles.section, { backgroundColor: colors.card }]}
-          >
-            <View style={styles.sectionHeader}>
-              <LocalIonicon
-                name="warning"
-                size={24}
-                color={statusColors.warning}
-              />
-              <ThemedText
-                type="subtitle"
-                style={[styles.sectionTitle, { color: statusColors.warning }]}
-              >
-                System Errors{" "}
-                {latestErrorMessages.length > 0
-                  ? `(${latestErrorMessages.length})`
-                  : ""}
+            {/* Maintenance Log Section */}
+            <Animated.View
+              entering={FadeInUp.delay(200).springify()}
+              style={[
+                styles.section,
+                { backgroundColor: isDarkMode ? colors.card : "#fff" },
+              ]}
+            >
+              <ThemedText style={styles.sectionTitle}>Maintenance Log</ThemedText>
+              <ThemedText style={styles.noDataText}>
+                Maintenance logs are not available for this system at the moment.
               </ThemedText>
+            </Animated.View>
 
-              {demoMode && (
-                <TouchableOpacity
-                  style={styles.demoButton}
-                  onPress={addDemoErrorMessage}
-                >
-                  <ThemedText type="caption" style={{ color: "#FF9800" }}>
-                    + Add Demo Error
-                  </ThemedText>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {latestErrorMessages.length > 0 ? (
-              latestErrorMessages.map((msg, idx) => (
-                <View
-                  key={`error-${idx}`}
-                  style={[
-                    styles.errorItem,
-                    { borderBottomColor: colors.border },
-                  ]}
-                >
-                  <View style={styles.errorHeader}>
-                    <LocalIonicon
-                      name="alert-circle"
-                      size={16}
-                      color={statusColors.warning}
-                    />
-                    <ThemedText type="error" style={styles.errorItemTitle}>
-                      {msg.text || "Unknown Error"}
-                    </ThemedText>
-                  </View>
-
-                  <View style={styles.errorDetails}>
-                    <View style={styles.errorDetail}>
-                      <ThemedText
-                        type="caption"
-                        style={styles.errorDetailLabel}
-                      >
-                        Error Code:
-                      </ThemedText>
-                      <ThemedText
-                        type="caption"
-                        style={styles.errorDetailValue}
-                      >
-                        {msg.stateCode || "N/A"}
-                      </ThemedText>
-                    </View>
-
-                    <View style={styles.errorDetail}>
-                      <ThemedText
-                        type="caption"
-                        style={styles.errorDetailLabel}
-                      >
-                        Device ID:
-                      </ThemedText>
-                      <ThemedText
-                        type="caption"
-                        style={styles.errorDetailValue}
-                      >
-                        {msg.deviceId || "System Level"}
-                      </ThemedText>
-                    </View>
-
-                    <View style={styles.errorDetail}>
-                      <ThemedText
-                        type="caption"
-                        style={styles.errorDetailLabel}
-                      >
-                        Type:
-                      </ThemedText>
-                      <ThemedText
-                        type="caption"
-                        style={styles.errorDetailValue}
-                      >
-                        {msg.stateType || "Unknown"}
-                      </ThemedText>
-                    </View>
-                  </View>
-
-                  <ThemedText type="caption" style={styles.errorTimestamp}>
-                    {formatDateTime(msg.logDateTime)}
-                  </ThemedText>
-                </View>
-              ))
-            ) : demoMode ? (
-              <View style={styles.emptyErrorState}>
-                <ThemedText type="caption">
-                  No errors found. Add a demo error using the button above.
+            {/* Basic System Info Section */}
+            <Animated.View
+              entering={FadeInUp.delay(300).springify()}
+              style={[
+                styles.section,
+                { backgroundColor: isDarkMode ? colors.card : "#fff" },
+              ]}
+            >
+              <ThemedText style={styles.sectionTitle}>
+                System Information
+              </ThemedText>
+              <View style={styles.infoItem}>
+                <ThemedText style={styles.infoLabel}>ID:</ThemedText>
+                <ThemedText style={styles.infoValue}>
+                  {pvSystemDetails.pvSystemId}
                 </ThemedText>
               </View>
-            ) : null}
-          </ThemedView>
+              <View style={styles.infoItem}>
+                <ThemedText style={styles.infoLabel}>Installation:</ThemedText>
+                <ThemedText style={styles.infoValue}>
+                  {formatDate(pvSystemDetails.installationDate)}
+                </ThemedText>
+              </View>
+              <View style={styles.infoItem}>
+                <ThemedText style={styles.infoLabel}>Last Import:</ThemedText>
+                <ThemedText style={styles.infoValue}>
+                  {formatDateTime(pvSystemDetails.lastImport)}
+                </ThemedText>
+              </View>
+              <View style={styles.infoItem}>
+                <ThemedText style={styles.infoLabel}>Time Zone:</ThemedText>
+                <ThemedText style={styles.infoValue}>
+                  {pvSystemDetails.timeZone}
+                </ThemedText>
+              </View>
+            </Animated.View>
+
+            {/* Location Section */}
+            <Animated.View
+              entering={FadeInUp.delay(400).springify()}
+              style={[
+                styles.section,
+                { backgroundColor: isDarkMode ? colors.card : "#fff" },
+              ]}
+            >
+              <ThemedText style={styles.sectionTitle}>Location</ThemedText>
+              <View style={styles.infoItem}>
+                <ThemedText style={styles.infoLabel}>Street:</ThemedText>
+                <ThemedText style={styles.infoValue}>
+                  {pvSystemDetails.address.street ?? "N/A"}
+                </ThemedText>
+              </View>
+              <View style={styles.infoItem}>
+                <ThemedText style={styles.infoLabel}>City:</ThemedText>
+                <ThemedText style={styles.infoValue}>
+                  {pvSystemDetails.address.city ?? "N/A"}
+                </ThemedText>
+              </View>
+              <View style={styles.infoItem}>
+                <ThemedText style={styles.infoLabel}>Zip Code:</ThemedText>
+                <ThemedText style={styles.infoValue}>
+                  {pvSystemDetails.address.zipCode ?? "N/A"}
+                </ThemedText>
+              </View>
+              <View style={styles.infoItem}>
+                <ThemedText style={styles.infoLabel}>State:</ThemedText>
+                <ThemedText style={styles.infoValue}>
+                  {pvSystemDetails.address.state ?? "N/A"}
+                </ThemedText>
+              </View>
+              <View style={styles.infoItem}>
+                <ThemedText style={styles.infoLabel}>Country:</ThemedText>
+                <ThemedText style={styles.infoValue}>
+                  {pvSystemDetails.address.country ?? "N/A"}
+                </ThemedText>
+              </View>
+            </Animated.View>
+
+            {/* Error Messages Section (Conditional) */}
+            {(latestErrorMessages.length > 0 || demoMode) && (
+              <ThemedView
+                type="card"
+                style={[styles.section, { backgroundColor: colors.card }]}
+              >
+                <View style={styles.sectionHeader}>
+                  <LocalIonicon
+                    name="warning"
+                    size={24}
+                    color={statusColors.warning}
+                  />
+                  <ThemedText
+                    type="subtitle"
+                    style={[styles.sectionTitle, { color: statusColors.warning }]}
+                  >
+                    System Errors{" "}
+                    {latestErrorMessages.length > 0
+                      ? `(${latestErrorMessages.length})`
+                      : ""}
+                  </ThemedText>
+
+                  {demoMode && (
+                    <TouchableOpacity
+                      style={styles.demoButton}
+                      onPress={addDemoErrorMessage}
+                    >
+                      <ThemedText type="caption" style={{ color: "#FF9800" }}>
+                        + Add Demo Error
+                      </ThemedText>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {latestErrorMessages.length > 0 ? (
+                  latestErrorMessages.map((msg, idx) => (
+                    <View
+                      key={`error-${idx}`}
+                      style={[
+                        styles.errorItem,
+                        { borderBottomColor: colors.border },
+                      ]}
+                    >
+                      <View style={styles.errorHeader}>
+                        <LocalIonicon
+                          name="alert-circle"
+                          size={16}
+                          color={statusColors.warning}
+                        />
+                        <ThemedText type="error" style={styles.errorItemTitle}>
+                          {msg.text || "Unknown Error"}
+                        </ThemedText>
+                      </View>
+
+                      <View style={styles.errorDetails}>
+                        <View style={styles.errorDetail}>
+                          <ThemedText
+                            type="caption"
+                            style={styles.errorDetailLabel}
+                          >
+                            Error Code:
+                          </ThemedText>
+                          <ThemedText
+                            type="caption"
+                            style={styles.errorDetailValue}
+                          >
+                            {msg.stateCode || "N/A"}
+                          </ThemedText>
+                        </View>
+
+                        <View style={styles.errorDetail}>
+                          <ThemedText
+                            type="caption"
+                            style={styles.errorDetailLabel}
+                          >
+                            Device ID:
+                          </ThemedText>
+                          <ThemedText
+                            type="caption"
+                            style={styles.errorDetailValue}
+                          >
+                            {msg.deviceId || "System Level"}
+                          </ThemedText>
+                        </View>
+
+                        <View style={styles.errorDetail}>
+                          <ThemedText
+                            type="caption"
+                            style={styles.errorDetailLabel}
+                          >
+                            Type:
+                          </ThemedText>
+                          <ThemedText
+                            type="caption"
+                            style={styles.errorDetailValue}
+                          >
+                            {msg.stateType || "Unknown"}
+                          </ThemedText>
+                        </View>
+                      </View>
+
+                      <ThemedText type="caption" style={styles.errorTimestamp}>
+                        {formatDateTime(msg.logDateTime)}
+                      </ThemedText>
+                    </View>
+                  ))
+                ) : demoMode ? (
+                  <View style={styles.emptyErrorState}>
+                    <ThemedText type="caption">
+                      No errors found. Add a demo error using the button above.
+                    </ThemedText>
+                  </View>
+                ) : null}
+              </ThemedView>
+            )}
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -2011,7 +2089,6 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 16,
-    paddingTop: 8,
     paddingBottom: 16,
     flexDirection: "row",
     justifyContent: "flex-end",
@@ -2348,8 +2425,10 @@ const styles = StyleSheet.create({
   chartContainer: {
     backgroundColor: "transparent",
     borderRadius: 8,
-    paddingVertical: 16,
+    paddingTop: 16,
+  //  paddingVertical: 16,
     marginTop: 8,
+  //  flex: 1,
   },
   chartHeader: {
     flexDirection: "row",
@@ -2363,7 +2442,8 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   chart: {
-    marginVertical: 8,
+    marginTop: 8,
+  //  marginVertical: 8,
     borderRadius: 8,
   },
   periodSelectorContainer: {
@@ -2442,5 +2522,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     flexShrink: 1,
     overflow: "hidden",
+  },
+  navBarContainer: {
+    flexDirection: 'row',
+    height: 48,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
+    marginBottom: 2,
+  },
+  navTab: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  navTabText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
