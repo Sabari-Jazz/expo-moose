@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   StyleSheet,
   View,
@@ -17,6 +17,7 @@ import { useThemeColor } from "@/hooks/useThemeColor";
 import { uploadFeedback, uploadFeedbackSupabase } from "@/services/feedbackService";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import {Keyboard} from 'react-native'
 
 export default function FeedbackScreen() {
   const [name, setName] = useState("");
@@ -34,6 +35,7 @@ export default function FeedbackScreen() {
 
   // Bottom tab height adaptation
   const tabBarHeight = Platform.OS === "ios" ? 100 : 80;
+  const scrollViewRef = useRef<ScrollView>(null);
 
   const handleSubmit = async () => {
     // Simple form validation
@@ -89,6 +91,8 @@ export default function FeedbackScreen() {
           },
         ]
       );
+      Keyboard.dismiss();
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     } catch (error) {
       console.error("Error saving feedback:", error);
 
@@ -111,7 +115,7 @@ export default function FeedbackScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.keyboardAvoid}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
+    //    keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
       >
         <ScrollView
           contentContainerStyle={[
@@ -121,8 +125,10 @@ export default function FeedbackScreen() {
               paddingTop: 16,
               paddingHorizontal: 16,
             },
+            
           ]}
           keyboardShouldPersistTaps="handled"
+          ref={scrollViewRef}
         >
           <ThemedView type="card" style={styles.formContainer}>
             <ThemedText type="subtitle" style={styles.title}>

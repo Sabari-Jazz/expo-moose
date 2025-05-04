@@ -48,9 +48,10 @@ export default {
         NSLocationWhenInUseUsageDescription: "This app uses your location to show nearby solar systems.", // Present in both, keep one
         // From app.config.js
         UIStatusBarStyle: "UIStatusBarStyleDarkContent", // Present in both, keep one
-        UIViewControllerBasedStatusBarAppearance: true, // Present in both, keep one
+        UIViewControllerBasedStatusBarAppearance: false, // Present in both, keep one
         ITSAppUsesNonExemptEncryption: false,
         NSUserNotificationUsageDescription: "We use notifications to send you daily reminders and updates about your solar system.",
+
       },
       // Note: googleMapsApiKey removed, handled via 'extra' below
     },
@@ -139,8 +140,13 @@ export default {
       supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL2,
       supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY2,
       // EAS Project ID (using the one from app.config.js)
+    /*
       eas: {
-        projectId: "a6e0a3fc-5475-4e55-819f-8257b0ea3fb3",
+       projectId: "a6e0a3fc-5475-4e55-819f-8257b0ea3fb3",
+    },
+    */
+      eas: {
+        projectId: "f8b79784-8f4b-42a9-aa3c-e8a901abba87"
       },
       // Added from app.json's extra field (if needed, otherwise remove)
       router: {

@@ -106,7 +106,7 @@ export default function LoginPage() {
         { backgroundColor: isDarkMode ? colors.background : "#f5f5f5" },
       ]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 50 : 0}
+    //  keyboardVerticalOffset={Platform.OS === "ios" ? 50 : 0}
     >
       <StatusBar style={isDarkMode ? "light" : "dark"} />
 
