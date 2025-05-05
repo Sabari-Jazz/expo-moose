@@ -13,6 +13,7 @@ export interface User {
   password: string;
   name: string;
   role: 'admin' | 'user';
+  email: string;
 }
 
 export interface SystemAccess {
@@ -27,14 +28,16 @@ const users: User[] = [
     username: 'admin',
     password: 'admin123',
     name: 'Administrator',
-    role: 'admin'
+    role: 'admin',
+    email: 'admin@gmail.com'
   },
   {
     id: '2',
     username: 'ketan',
     password: 'pass',
     name: 'Ketan',
-    role: 'user'
+    role: 'user',
+    email: 'ketan@gmail.com',
   }
 ];
 
