@@ -699,6 +699,10 @@ export default function PvSystemDetailScreen() {
           label: "Earnings",
           value: calculateEarnings(dailyEnergyProduction),
         },
+        {
+          label: "Expected Earnings",
+          value: `$${(10.00).toFixed(2)}`,
+        },
       ],
     },
     {
@@ -729,6 +733,10 @@ export default function PvSystemDetailScreen() {
         {
           label: "Earnings",
           value: calculateEarnings(weeklyEnergyProduction),
+        },
+        {
+          label: "Expected Earnings",
+          value: `$${(10.00).toFixed(2)}`,
         },
       ],
     },
@@ -761,6 +769,10 @@ export default function PvSystemDetailScreen() {
           label: "Earnings",
           value: calculateEarnings(monthlyEnergyProduction),
         },
+        {
+          label: "Expected Earnings",
+          value: `$${(10.00).toFixed(2)}`,
+        },
       ],
     },
     {
@@ -791,6 +803,10 @@ export default function PvSystemDetailScreen() {
         {
           label: "Earnings",
           value: calculateEarnings(yearlyEnergyProduction),
+        },
+        {
+          label: "Expected Earnings",
+          value: `$${(10.00).toFixed(2)}`,
         },
       ],
     },
@@ -837,6 +853,7 @@ export default function PvSystemDetailScreen() {
   };
 
   // Render a dashboard card
+  /*
   const renderDashboardCard = ({
     item,
   }: {
@@ -878,7 +895,63 @@ export default function PvSystemDetailScreen() {
       </View>
     );
   };
-
+  */
+  const renderDashboardCard = ({
+    item,
+  }: {
+    item: (typeof dashboardData)[0];
+  }) => {
+    return (
+      <View
+        style={{
+          width: dashboardSectionWidth,
+          paddingHorizontal: 5,
+        }}
+      >
+        <View style={styles.kpiContainerCustom}>
+          {/* Left Column: 3 smaller items */}
+          <View style={styles.leftColumn}>
+            {item.metrics.slice(0, 3).map((metric, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.kpiItemSmall,
+                  { backgroundColor: isDarkMode ? colors.background : "#f8f8f8" },
+                ]}
+              >
+                <ThemedText style={styles.kpiLabel} numberOfLines={1} ellipsizeMode="tail">
+                  {metric.label}
+                </ThemedText>
+                <ThemedText style={[styles.kpiValue, { color: colors.primary }]} numberOfLines={1} ellipsizeMode="tail">
+                  {metric.value}
+                </ThemedText>
+              </View>
+            ))}
+          </View>
+  
+          {/* Right Column: 2 larger items */}
+          <View style={styles.rightColumn}>
+            {item.metrics.slice(3).map((metric, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.kpiItemLarge,
+                  { backgroundColor: isDarkMode ? colors.background : "#f8f8f8" },
+                ]}
+              >
+                <ThemedText style={styles.kpiLabelLarge} numberOfLines={1} ellipsizeMode="tail">
+                  {metric.label}
+                </ThemedText>
+                <ThemedText style={[styles.kpiValueLarge, { color: colors.primary }]} numberOfLines={1} ellipsizeMode="tail">
+                  {metric.value}
+                </ThemedText>
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+    );
+  };
   // --- Access Denied State ---
   if (hasAccess === false && !checkingAccess) {
     return (
@@ -1415,7 +1488,7 @@ export default function PvSystemDetailScreen() {
           headerLeft: () => (
             <TouchableOpacity
               onPress={() => router.push("/dashboard")}
-              style={{ marginLeft: 16, padding: 4 }}
+              style={{ marginLeft: 16, padding: 4, marginRight: 16 }}
             >
               <Ionicons name="arrow-back" size={24} color={colors.text} />
             </TouchableOpacity>
@@ -1547,6 +1620,7 @@ export default function PvSystemDetailScreen() {
                     dashboardData[pageNum].id as "today" | "week" | "month" | "year"
                   );
                 }}
+                scrollEnabled={false}
               />
             </Animated.View>
 
@@ -2318,5 +2392,55 @@ const styles = StyleSheet.create({
   navTabText: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  kpiContainerCustom: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  
+  leftColumn: {
+    flex: 1,
+    justifyContent: "space-between",
+  },
+  
+  rightColumn: {
+    flex: 1,
+    justifyContent: "space-between",
+  },
+  
+  kpiItemSmall: {
+    height: 70, // adjust to fit your screen
+    marginBottom: 8,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: "center",
+  },
+  
+  kpiItemLarge: {
+    height: 109,
+    marginBottom: 8,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: "center",
+    justifyContent: "center", // <-- center vertically
+  },
+  kpiLabelLarge: {
+    fontSize: 15,
+    marginBottom: 6,
+    opacity: 0.75,
+    textAlign: "center",
+    width: "100%",
+    flexShrink: 1,
+  },
+  
+  kpiValueLarge: {
+    fontSize: 22,
+    fontWeight: "bold",
+    textAlign: "center",
+    width: "100%",
+    flexShrink: 1,
   },
 });
