@@ -1227,112 +1227,134 @@ export default function PvSystemDetailScreen() {
     };
 
     // Process data for the chart
-    const validData = sortedData.filter(
-      (item) => !isNaN(new Date(item.logDateTime).getTime())
-    );
+    // Process data for the chart
+const validData = sortedData.filter(
+  (item) => !isNaN(new Date(item.logDateTime).getTime())
+);
 
-    const chartData = {
-      labels: validData.map((item, index) =>
-        getFormattedLabel(item.logDateTime, index, validData.length)
-      ),
-      datasets: [
-        {
-          data: validData.map((item) => {
-            const value = findChannelValue(
-              item.channels,
-              "EnergyProductionTotal"
-            );
+// Create gradient configuration
 
-            // For day view with historical data, we should properly handle the values
-            if (selectedChartPeriod === "day" && value !== null) {
-              // Historical data might be in Wh, convert to kWh
-              return Math.max(0, value / 1000);
-            } else if (value !== null) {
-              // For other periods, use the existing conversion
-              return Math.max(0, value / 1000); // Convert to kWh
-            } else {
-              return 0;
-            }
-          }),
-          color: (opacity = 1) => `rgba(66, 133, 244, ${opacity})`, // Line color
-          strokeWidth: 2.5,
-          // Add dots for fewer data points, hide them when there are many
-          withDots: validData.length <= 31,
-        },
-      ],
-    };
 
-    const chartConfig = {
-      backgroundGradientFrom: isDarkMode ? colors.card : "#fff",
-      backgroundGradientTo: isDarkMode ? colors.card : "#fff",
-      decimalPlaces: 1,
-      color: (opacity = 1) => `rgba(66, 133, 244, ${opacity})`,
-      labelColor: (opacity = 1) =>
-        isDarkMode
-          ? `rgba(255, 255, 255, ${opacity})`
-          : `rgba(0, 0, 0, ${opacity})`,
-      propsForLabels: {
-        fontSize: 10,
-        fontWeight: "400",
-      },
-      propsForBackgroundLines: {
-        strokeDasharray: "",
-        stroke: isDarkMode ? `rgba(255, 255, 255, 0.1)` : `rgba(0, 0, 0, 0.1)`,
-        strokeWidth: 1,
-      },
-      propsForDots: {
-        r: validData.length > 31 ? "0" : "3",
-        strokeWidth: "2",
-        stroke: "rgba(66, 133, 244, 0.8)",
-      },
-      formatYLabel: (value: string) => {
-        const num = parseFloat(value);
-        return num < 10 ? num.toFixed(1) : Math.round(num).toString();
-      },
-      style: {
-        borderRadius: 16,
-      },
-      formatXLabel: (label: string) => label,
-    };
+const chartData = {
+  labels: validData.map((item, index) =>
+    getFormattedLabel(item.logDateTime, index, validData.length)
+  ),
+  datasets: [
+    {
+      data: validData.map((item) => {
+        const value = findChannelValue(
+          item.channels,
+          "EnergyProductionTotal"
+        );
 
-    // Determine chart title based on period
-    const chartTitle =
-      selectedChartPeriod === "day"
-        ? "Daily Energy Production (kWh)"
-        : selectedChartPeriod === "week"
-        ? "Weekly Energy Production (kWh)"
-        : selectedChartPeriod === "month"
-        ? "Monthly Energy Production (kWh)"
-        : "Yearly Energy Production (kWh)";
+        // For day view with historical data, we should properly handle the values
+        if (selectedChartPeriod === "day" && value !== null) {
+          // Historical data might be in Wh, convert to kWh
+          return Math.max(0, value / 1000);
+        } else if (value !== null) {
+          // For other periods, use the existing conversion
+          return Math.max(0, value / 1000); // Convert to kWh
+        } else {
+          return 0;
+        }
+      }),
+      color: (opacity = 1) => `rgba(255, 122, 69, ${opacity})`, // Vibrant orange line color
+      strokeWidth: 3,
+      // Add dots for fewer data points, hide them when there are many
+      withDots: validData.length <= 31,
+    },
+  ],
+};
 
-    return (
-      <View style={styles.chartContainer}
-      onLayout={(event) => {
-        const { width, height } = event.nativeEvent.layout;
-        setEnergySectionWidth(width);
-        setEnergySectionHeight(height)
-      }}
-      >
-        <View style={styles.chartHeader}>
-          <ThemedText style={styles.chartTitle}>{chartTitle}</ThemedText>
-          </View>
-          {energySectionWidth !== null && (
-        <LineChart
-          data={chartData}
-          width={energySectionWidth}
-          height={screenHeight * 0.5}
-          chartConfig={chartConfig}
-          bezier
-          style={styles.chart}
-          withVerticalLines={validData.length <= 31}
-          withHorizontalLines={true}
-          fromZero={true}
-          yAxisSuffix=" kWh"
-          withInnerLines={true}
-          segments={5}
-          yAxisInterval={1}
-        />
-          )}
+const chartConfig = {
+  backgroundGradientFrom: isDarkMode ? colors.card : "#fff",
+  backgroundGradientTo: isDarkMode ? colors.card : "#fff",
+  decimalPlaces: 1,
+  color: (opacity: number = 1) => `rgba(255, 122, 69, ${opacity})`, // Match the line color
+  fillShadowGradientFrom: 'rgba(255, 122, 69, 0.8)',
+  fillShadowGradientTo: 'rgba(58, 123, 213, 0.2)',
+  fillShadowGradientOpacity: 1,
+ // fillShadowGradient: 1,
+  labelColor: (opacity: number = 1) =>
+    isDarkMode
+      ? `rgba(255, 255, 255, ${opacity})`
+      : `rgba(0, 0, 0, ${opacity})`,
+
+  propsForLabels: {
+    fontSize: 10,
+    fontWeight: "400",
+  },
+
+  propsForBackgroundLines: {
+    strokeDasharray: "",
+    stroke: isDarkMode ? `rgba(255, 255, 255, 0.15)` : `rgba(0, 0, 0, 0.15)`,
+    strokeWidth: 1,
+  },
+
+  propsForDots: {
+    r: validData.length > 31 ? "0" : "4",
+    strokeWidth: "2",
+    stroke: "rgba(255, 122, 69, 0.9)",
+    fill: "#fff",
+  },
+
+  formatYLabel: (value: string) => {
+    const num = parseFloat(value);
+    return num < 10 ? num.toFixed(1) : Math.round(num).toString();
+  },
+
+  formatXLabel: (label: string) => label,
+
+  style: {
+    borderRadius: 16,
+  },
+
+ 
+};
+
+// Determine chart title based on period
+const chartTitle =
+  selectedChartPeriod === "day"
+    ? "Daily Energy Production (kWh)"
+    : selectedChartPeriod === "week"
+    ? "Weekly Energy Production (kWh)"
+    : selectedChartPeriod === "month"
+    ? "Monthly Energy Production (kWh)"
+    : "Yearly Energy Production (kWh)";
+
+
+
+return (
+  <View style={styles.chartContainer}
+  onLayout={(event) => {
+    const { width, height } = event.nativeEvent.layout;
+    setEnergySectionWidth(width);
+    setEnergySectionHeight(height);
+  }}
+  >
+    <View style={styles.chartHeader}>
+      <ThemedText style={styles.chartTitle}>{chartTitle}</ThemedText>
+     
+    </View>
+    {energySectionWidth !== null && (
+      <LineChart
+        data={chartData}
+        width={energySectionWidth}
+        height={screenHeight * 0.5}
+        chartConfig={chartConfig}
+        bezier
+        withShadow={true}
+        style={styles.chart}
+        withVerticalLines={true}
+        withHorizontalLines={true}
+        fromZero={true}
+        yAxisSuffix=" kWh"
+        withInnerLines={true}
+        segments={5}
+        yAxisInterval={1}
+        
+      />
+    )}
       </View>
     );
   };
@@ -2443,4 +2465,10 @@ const styles = StyleSheet.create({
     width: "100%",
     flexShrink: 1,
   },
+  peakInfo: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginTop: 4,
+
+  }
 });
