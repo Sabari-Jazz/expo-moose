@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect} from "react";
 import {
   StyleSheet,
   View,
@@ -18,6 +18,8 @@ import { uploadFeedback, uploadFeedbackSupabase } from "@/services/feedbackServi
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import {Keyboard} from 'react-native'
+import { getCurrentUser} from "@/utils/auth";
+import { getCurrentWeather } from "@/api/api";
 
 export default function FeedbackScreen() {
   const [name, setName] = useState("");
@@ -26,6 +28,7 @@ export default function FeedbackScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [lastTicketId, setLastTicketId] = useState<string | null>(null);
   const [feedbackType, setFeedbackType] = useState<'bug' | 'feature'>('bug');
+  
 
   const primaryColor = useThemeColor({}, "tint");
   const backgroundColor = useThemeColor({}, "background");
@@ -36,6 +39,16 @@ export default function FeedbackScreen() {
   // Bottom tab height adaptation
   const tabBarHeight = Platform.OS === "ios" ? 100 : 80;
   const scrollViewRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    const setUserEmail = async () => {
+      const user = await getCurrentUser();
+      setEmail(user?.email ?? '');
+
+    }
+    setUserEmail();
+
+  }, [])
 
   const handleSubmit = async () => {
     // Simple form validation
