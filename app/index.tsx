@@ -166,7 +166,7 @@ export default function LoginPage() {
 
           {/* Login Form */}
           <Animated.View
-            entering={SlideInUp.delay(300).duration(700).springify()}
+            entering={FadeIn.delay(100).duration(600)}
           >
             <Surface
               style={[
