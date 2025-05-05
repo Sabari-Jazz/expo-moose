@@ -736,7 +736,7 @@ export default function PvSystemDetailScreen() {
         },
         {
           label: "Expected Earnings",
-          value: `$${(10.00).toFixed(2)}`,
+          value: `$${(70.00).toFixed(2)}`,
         },
       ],
     },
@@ -771,7 +771,7 @@ export default function PvSystemDetailScreen() {
         },
         {
           label: "Expected Earnings",
-          value: `$${(10.00).toFixed(2)}`,
+          value: `$${(300.00).toFixed(2)}`,
         },
       ],
     },
@@ -806,7 +806,7 @@ export default function PvSystemDetailScreen() {
         },
         {
           label: "Expected Earnings",
-          value: `$${(10.00).toFixed(2)}`,
+          value: `$${(3650.00).toFixed(2)}`,
         },
       ],
     },
