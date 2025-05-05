@@ -286,12 +286,16 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
+    width: '100%',
   },
   inner: {
     flex: 1,
     justifyContent: "center",
     position: "relative",
     paddingTop: 50,
+    width: '100%',
+    maxWidth: 500, // Maximum width for larger screens
+    alignSelf: 'center', // Center content on larger screens
   },
   headerNav: {
     position: "absolute",
@@ -301,25 +305,31 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     alignItems: "center",
-    marginBottom: 30,
+    marginBottom: '6%', // Use percentage for responsive vertical spacing
+    width: '100%',
   },
   headerText: {
     fontWeight: "bold",
     marginBottom: 8,
+    textAlign: 'center',
   },
   formContainer: {
-    padding: 24,
+    padding: '5%', // Percentage-based padding adapts to screen width
     borderRadius: 12,
     borderWidth: 1,
     marginBottom: 20,
+    width: '100%',
   },
   input: {
     marginBottom: 16,
+    width: '100%',
   },
   logo: {
-    width: 120,
-    height: 120,
-    marginBottom: 20,
+    width: '45%', 
+    height: undefined, 
+    aspectRatio: 1, 
+    minWidth: 80, 
+    maxWidth: 120, 
   },
   errorText: {
     color: "#f44336",
@@ -332,19 +342,23 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingVertical: 6,
     borderRadius: 8,
+    width: '100%',
   },
   demoCredentialsContainer: {
     marginTop: 20,
     alignItems: "center",
+    width: '100%',
   },
   credentialInfo: {
     fontWeight: "bold",
     fontSize: 14,
     marginBottom: 4,
+    textAlign: 'center',
   },
   credentialDetail: {
     fontSize: 12,
     lineHeight: 18,
+    textAlign: 'center',
   },
   backButton: {
     alignSelf: "flex-start",
