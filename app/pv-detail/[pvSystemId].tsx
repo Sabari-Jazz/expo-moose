@@ -1687,7 +1687,7 @@ return (
               ]}
             >
               <View style={styles.sectionHeader}>
-                <ThemedText style={styles.sectionTitle}>Devices</ThemedText>
+                <ThemedText style={styles.sectionTitle}>Devices Expo</ThemedText>
                 <TouchableOpacity
                   onPress={() => {
                     Alert.alert(
