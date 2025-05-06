@@ -10,7 +10,7 @@ export default {
     // --- Basic App Info (Using values from app.config.js primarily) ---
     name: "Moose Solar",
     slug: "moose-solar",
-    version: "1.0.2", // Consider using eas.json appVersionSource: remote
+    version: "1.0.4", // Consider using eas.json appVersionSource: remote
     orientation: "portrait",
     scheme: "moose-solar", // Added from app.json
     updates: {
@@ -46,7 +46,7 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.moose.solar",
-      buildNumber: "1.0.2", // Consider using eas build --auto-increment or remote app version source
+      buildNumber: "1.0.4", // Consider using eas build --auto-increment or remote app version source
       // Merged infoPlist entries from both files
       infoPlist: {
         // From app.json
