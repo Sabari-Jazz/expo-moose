@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Keyboard,
+  Modal,
 } from "react-native";
 import axios from "axios";
 import Markdown from "react-native-markdown-display"; // Import the markdown display library
@@ -20,6 +21,9 @@ import KeyboardAwareView from "@/components/KeyboardAwareView";
 import { getJwtToken } from "@/api/api";
 import { getCurrentUser} from "@/utils/auth";
 import { User } from "@/utils/auth";
+import { getAccessibleSystems } from "@/utils/auth";
+import * as api from "@/api/api";
+import { Picker } from '@react-native-picker/picker';
 
 // --- API Configuration ---
 const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
@@ -28,7 +32,7 @@ const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
 interface ChatRequest {
   message: string;
   username?: string;
-
+  system_id?: string | null;
   jwtToken?: string;
 }
 
@@ -42,14 +46,18 @@ interface SourceDocument {
   metadata?: any;
 }
 
-const getChatResponse = async (message: string, username: string): Promise<string> => {
+const getChatResponse = async (message: string, username: string, systemId: string | null): Promise<string> => {
   try {
-    console.log("Sending message to API:", message);
-    const response = await axios.post<ChatResponse>(API_URL, {
+    const requestData = {
       message: message,
       username: username,
+      system_id: systemId,
       jwtToken: await getJwtToken(),
-    } as ChatRequest);
+    } as ChatRequest;
+    
+    console.log("Sending API request with data:", JSON.stringify(requestData, null, 2));
+    
+    const response = await axios.post<ChatResponse>(API_URL, requestData);
     
     console.log("Received response from API:", response.data);
     if (response.data && response.data.response) {
@@ -90,7 +98,13 @@ interface ChatMessage {
   content: string;
 }
 
-export default function Chat2Screen() {
+// System interface for selection
+interface PvSystem {
+  id: string;
+  name: string;
+}
+
+export default function ChatScreen() {
   const { isDarkMode, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -103,14 +117,79 @@ export default function Chat2Screen() {
   const inputRef = useRef<TextInput>(null);
   const userId = useRef(`user_${Math.random().toString(36).substring(2, 9)}`);
   const [user, setUser] = useState<Omit<User, 'password'> | null>(null);
+  const [systems, setSystems] = useState<PvSystem[]>([]);
+  const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
+  const [loadingSystems, setLoadingSystems] = useState(true);
+  const [showSystemModal, setShowSystemModal] = useState(false);
 
+  // Set a default selected system if none is selected
   useEffect(() => {
-    const loadUser = async () => {
-      const currentUser = await getCurrentUser();
-      setUser(currentUser);
+    if (systems.length > 0 && !selectedSystemId) {
+      console.log("Setting default system:", systems[0].id);
+      setSelectedSystemId(systems[0].id);
+    }
+  }, [systems]);
+
+  // Load user and their systems
+  useEffect(() => {
+    const loadUserAndSystems = async () => {
+      try {
+        // Get current user
+        const currentUser = await getCurrentUser();
+        console.log("Current user:", currentUser);
+        setUser(currentUser);
+        
+        if (currentUser) {
+          setLoadingSystems(true);
+          
+          // Get user's accessible system IDs
+          const systemIds = getAccessibleSystems(currentUser.id);
+          console.log("Accessible system IDs:", systemIds);
+          
+          // Fetch all systems
+          const allSystems = await api.getPvSystems(0, 1000);
+          console.log("All systems from API:", allSystems);
+          
+          // Filter to just the accessible systems for this user, or all systems for admin
+          let userSystems: PvSystem[] = [];
+          
+          if (currentUser.role === 'admin' || systemIds.length === 0) {
+            // Admin has access to all systems
+            userSystems = allSystems.map(sys => ({
+              id: sys.pvSystemId,
+              name: sys.name
+            }));
+            console.log("Admin user or empty systemIds - all systems accessible");
+          } else {
+            // Regular user with specific system access
+            userSystems = allSystems
+              .filter(sys => systemIds.includes(sys.pvSystemId))
+              .map(sys => ({
+                id: sys.pvSystemId,
+                name: sys.name
+              }));
+            console.log("Filtered systems for regular user");
+          }
+          
+          console.log("Final user systems:", userSystems);
+          setSystems(userSystems);
+          
+          // Set default selected system if there's only one
+          if (userSystems.length === 1) {
+            console.log("Only one system available, setting as default:", userSystems[0]);
+            setSelectedSystemId(userSystems[0].id);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading user and systems:", error);
+      } finally {
+        setLoadingSystems(false);
+      }
     };
-    loadUser();
+    
+    loadUserAndSystems();
   }, []);
+
   // Keyboard listeners
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
@@ -199,7 +278,13 @@ export default function Chat2Screen() {
     setIsLoading(true); // Show loading indicator and trigger loading message effect
 
     try {
-      const responseMessage = await getChatResponse(contentToSend, user?.name || 'default_user');
+      // Pass the selected system ID to the API if one is selected
+      const responseMessage = await getChatResponse(
+        contentToSend, 
+        user?.name || 'default_user',
+        selectedSystemId
+      );
+      
       const assistantMessage: ChatMessage = {
         role: "assistant",
         content: responseMessage,
@@ -309,77 +394,264 @@ export default function Chat2Screen() {
     </View>
   );
 
-  // --- Initial Prompt Buttons ---
-  const renderInitialPrompts = () => (
-    <View style={styles.initialPromptsContainer}>
-      <View style={styles.robotIconPlaceholder}>
-        <Image
-          source={require("@/assets/icon.png")}
-          style={{ width: 100, height: 70 }}
-        />
-      </View>
-      <Text style={[styles.initialTitle, { color: colors.text }]}>
-        Hello There!
-      </Text>
-      <Text style={[styles.initialSubtitle, { color: colors.text }]}>
-        What would you like to know about your solar system?
-      </Text>
-
-      <TouchableOpacity
-        style={[
-          styles.promptButton,
-          { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
-        ]}
-        onPress={() => handlePromptClick("Tell me about STATE 102 error code")}
-        disabled={isLoading}
-      >
-        <Text style={[styles.promptButtonText, { color: colors.text }]}>
-          Tell me about STATE 102 error code
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[
-          styles.promptButton,
-          { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
-        ]}
-        onPress={() => handlePromptClick("How do I clean my solar panels?")}
-        disabled={isLoading}
-      >
-        <Text style={[styles.promptButtonText, { color: colors.text }]}>
-          How do I clean my solar panels?
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[
-          styles.promptButton,
-          { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
-        ]}
-        onPress={() => handlePromptClick("What is my energy production today?")}
-        disabled={isLoading}
-      >
-        <Text style={[styles.promptButtonText, { color: colors.text }]}>
-          What is my energy production today?
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[
-          styles.promptButton,
-          { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
-        ]}
-        onPress={() => handlePromptClick("How often should I maintain my system?")}
-        disabled={isLoading}
-      >
-        <Text style={[styles.promptButtonText, { color: colors.text }]}>
-          How often should I maintain my system?
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
-
   // --- Handle Clicking Initial Prompts ---
   const handlePromptClick = (promptText: string) => {
     if (isLoading) return; // Prevent multiple submissions
     handleSend(promptText); // Call handleSend directly with the prompt text
+  };
+
+  // Get the name of the selected system
+  const getSelectedSystemName = (): string | null => {
+    if (!selectedSystemId) return null;
+    const system = systems.find(s => s.id === selectedSystemId);
+    return system ? system.name : null;
+  };
+
+  // --- Initial Prompt Buttons ---
+  const renderInitialPrompts = () => {
+    const systemName = getSelectedSystemName();
+    const systemText = systemName ? ` for ${systemName}` : '';
+    
+    return (
+      <View style={styles.initialPromptsContainer}>
+        <View style={styles.robotIconPlaceholder}>
+          <Image
+            source={require("@/assets/icon.png")}
+            style={{ width: 100, height: 70 }}
+          />
+        </View>
+        <Text style={[styles.initialTitle, { color: colors.text }]}>
+          Hello There!
+        </Text>
+        <Text style={[styles.initialSubtitle, { color: colors.text }]}>
+          What would you like to know about your solar system?
+        </Text>
+
+        <TouchableOpacity
+          style={[
+            styles.promptButton,
+            { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
+          ]}
+          onPress={() => handlePromptClick(`Tell me about STATE 102 error code${systemText}`)}
+          disabled={isLoading}
+        >
+          <Text style={[styles.promptButtonText, { color: colors.text }]}>
+            Tell me about STATE 102 error code
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.promptButton,
+            { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
+          ]}
+          onPress={() => handlePromptClick(`How do I clean my solar panels${systemText}?`)}
+          disabled={isLoading}
+        >
+          <Text style={[styles.promptButtonText, { color: colors.text }]}>
+            How do I clean my solar panels?
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.promptButton,
+            { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
+          ]}
+          onPress={() => handlePromptClick(`What is my energy production today${systemText}?`)}
+          disabled={isLoading}
+        >
+          <Text style={[styles.promptButtonText, { color: colors.text }]}>
+            {systemName 
+              ? `What is ${systemName}'s energy production today?` 
+              : "What is my energy production today?"}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.promptButton,
+            { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
+          ]}
+          onPress={() => handlePromptClick(`How often should I maintain my system${systemText}?`)}
+          disabled={isLoading}
+        >
+          <Text style={[styles.promptButtonText, { color: colors.text }]}>
+            How often should I maintain my system?
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  // Render the system selector
+  const renderSystemSelector = () => {
+    console.log("Rendering system selector with systems:", systems);
+    console.log("Loading systems state:", loadingSystems);
+    console.log("Selected system ID:", selectedSystemId);
+    
+    if (loadingSystems) {
+      return (
+        <View style={styles.systemSelectorContainer}>
+          <Text style={[styles.systemSelectorLabel, { color: colors.text }]}>
+            Loading systems...
+          </Text>
+          <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      );
+    }
+    
+    if (systems.length === 0) {
+      console.log("No systems available to show in selector");
+      return (
+        <View style={styles.systemSelectorContainer}>
+          <Text style={[styles.systemSelectorLabel, { color: colors.text }]}>
+            No systems available
+          </Text>
+        </View>
+      );
+    }
+
+    const currentSystem = systems.find(s => s.id === selectedSystemId);
+    const currentSystemName = currentSystem ? currentSystem.name : "Select system";
+
+    return (
+      <View style={styles.systemSelectorContainer}>
+        <Text style={[styles.systemSelectorLabel, { color: colors.text }]}>
+          Select a system:
+        </Text>
+
+        {/* Dropdown button - works on both iOS and Android */}
+        <TouchableOpacity
+          style={[
+            styles.dropdownButton,
+            { 
+              backgroundColor: isDarkMode ? colors.card : '#f5f5f5',
+              borderColor: colors.primary,
+              borderWidth: 1,
+            }
+          ]}
+          onPress={() => {
+            // On iOS, show a modal with the system options
+            if (Platform.OS === 'ios') {
+              setShowSystemModal(true);
+            }
+            // On Android, this just draws focus to the native picker
+          }}
+        >
+          <Text style={[styles.dropdownButtonText, { color: colors.text }]}>
+            {currentSystemName}
+          </Text>
+          <Ionicons 
+            name="chevron-down" 
+            size={18} 
+            color={colors.text} 
+          />
+        </TouchableOpacity>
+        
+        {/* System selection modal for iOS */}
+        {Platform.OS === 'ios' && (
+          <Modal
+            visible={showSystemModal}
+            transparent={true}
+            animationType="slide"
+            onRequestClose={() => setShowSystemModal(false)}
+          >
+            <TouchableOpacity
+              style={styles.modalOverlay}
+              activeOpacity={1}
+              onPress={() => setShowSystemModal(false)}
+            >
+              <View 
+                style={[
+                  styles.modalContent, 
+                  {
+                    backgroundColor: isDarkMode ? colors.card : '#fff',
+                    borderColor: colors.border,
+                  }
+                ]}
+              >
+                <Text 
+                  style={[
+                    styles.modalTitle, 
+                    { color: colors.text }
+                  ]}
+                >
+                  Select a System
+                </Text>
+                
+                <FlatList
+                  data={systems}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={[
+                        styles.modalItem,
+                        selectedSystemId === item.id && {
+                          backgroundColor: isDarkMode 
+                            ? 'rgba(59, 130, 246, 0.2)' 
+                            : 'rgba(59, 130, 246, 0.1)'
+                        }
+                      ]}
+                      onPress={() => {
+                        setSelectedSystemId(item.id);
+                        setShowSystemModal(false);
+                      }}
+                    >
+                      <Text style={[styles.modalItemText, { color: colors.text }]}>
+                        {item.name}
+                      </Text>
+                      {selectedSystemId === item.id && (
+                        <Ionicons name="checkmark" size={24} color={colors.primary} />
+                      )}
+                    </TouchableOpacity>
+                  )}
+                />
+                
+                <TouchableOpacity
+                  style={[
+                    styles.closeButton,
+                    { backgroundColor: colors.primary }
+                  ]}
+                  onPress={() => setShowSystemModal(false)}
+                >
+                  <Text style={styles.closeButtonText}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </Modal>
+        )}
+        
+        {/* Android native Picker */}
+        {Platform.OS !== 'ios' && (
+          <View style={[
+            styles.pickerContainer, 
+            { 
+              backgroundColor: isDarkMode ? colors.background : '#f5f5f5',
+              borderColor: colors.primary,
+              borderWidth: 1,
+            }
+          ]}>
+            <Picker
+              selectedValue={selectedSystemId}
+              onValueChange={(value: string | null) => {
+                if (value) { // Ensure value is not null
+                  console.log("System selected:", value);
+                  setSelectedSystemId(value);
+                }
+              }}
+              style={[styles.picker, { color: colors.text }]}
+              dropdownIconColor={colors.primary}
+            >
+              {systems.map(system => (
+                <Picker.Item 
+                  key={system.id} 
+                  label={system.name} 
+                  value={system.id} 
+                />
+              ))}
+            </Picker>
+          </View>
+        )}
+      </View>
+    );
   };
 
   return (
@@ -395,6 +667,9 @@ export default function Chat2Screen() {
       extraScrollHeight={120}
       dismissKeyboardOnTouch={false}
     >
+      {/* System Selector */}
+      {renderSystemSelector()}
+      
       {messages.length === 0 ? (
         // Show initial prompts when no messages
         renderInitialPrompts()
@@ -580,5 +855,80 @@ const styles = StyleSheet.create({
   },
   promptButtonText: {
     fontSize: 16,
+  },
+  systemSelectorContainer: {
+    padding: 10,
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 5,
+    borderRadius: 8,
+  },
+  systemSelectorLabel: {
+    fontSize: 14,
+    fontWeight: "bold",
+    marginBottom: 8,
+  },
+  pickerContainer: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginBottom: 5,
+  },
+  picker: {
+    height: 45,
+    width: '100%',
+  },
+  dropdownButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+  },
+  dropdownButtonText: {
+    fontSize: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '80%',
+    maxHeight: '70%',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 20,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 15,
+  },
+  modalItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    marginVertical: 4,
+    width: '100%',
+  },
+  modalItemText: {
+    fontSize: 16,
+  },
+  closeButton: {
+    marginTop: 15,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  closeButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 }); 
