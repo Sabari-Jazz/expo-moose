@@ -48,16 +48,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-"""
-# Check for OpenAI API key
-if not os.getenv("OPENAI_API_KEY"):
-    print("Warning: OPENAI_API_KEY not set in environment. RAG functionality will be disabled.")
-    HAS_OPENAI_KEY = False
-else:
-    HAS_OPENAI_KEY = True
-    """
 
-api_key="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"
+# Get API key from environment variables
+api_key = os.getenv("OPENAI_API_KEY")
 
 # Initialize OpenAI client
 openai_client = OpenAI(api_key=api_key)
@@ -258,8 +251,8 @@ def get_energy_production(system_id: str, start_date: str = None, end_date: str 
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'AccessKeyId': 'FKIA08F3E94E3D064B629EE82A44C8D1D0A6',
-        'AccessKeyValue': '2f62d6f2-77e6-4796-9fd1-5d74b5c6474c',
+        'AccessKeyId': os.getenv('SOLAR_WEB_ACCESS_KEY_ID'),
+        'AccessKeyValue': os.getenv('SOLAR_WEB_ACCESS_KEY_VALUE'),
         'Authorization': f'Bearer {jwt_token}' if jwt_token else 'Bearer eyJ4NXQiOiJOalpoT0dJMVpqQXpaVGt5TlRVNU1UbG1NVFkzWVRGbU9UWmpObVE0TURnME1HTmlZbU5sWkEiLCJraWQiOiJORFk0TVdaalpqWmhZakpsT1RRek5UTTVObUUwTkRWa016TXpOak16TmpBd1ptUmlNRFZsT1dRMVpHWmxPVEU1TWpSaU1XVXhZek01TURObU1ESXdaUV9SUzI1NiIsImFsZyI6IlJTMjU2In0.eyJhdF9oYXNoIjoiNUt6S0p1N1Q3RXk1VlZ6QWJQTE14dyIsImF1ZCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJzdWIiOiJtb25pdG9yaW5nQGphenpzb2xhci5jb20iLCJuYmYiOjE3NDczMTQyNTMsImF6cCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJhbXIiOlsicGFzc3dvcmQiXSwiaXNzIjoiaHR0cHM6XC9cL2xvZ2luLmZyb25pdXMuY29tXC9vYXV0aDJcL29pZGNkaXNjb3ZlcnkiLCJleHAiOjE3NDczMTc4NTMsImNvbnRhY3RfaWQiOiI2OGRmODA0My03OTI0LWUzMTEtOTc4ZS0wMDUwNTZhMjAwMDMiLCJpYXQiOjE3NDczMTQyNTN9.g9yitwr_6sHLOCRI2TAH7OZ_ibyQznkGmg3oEsdcySag5NYnimo5SY0OXIgTwNhoDkBsvA9BD-EWTN93ED7P1zR4RtUTo3iTJGaH5rTzdk33Tbk0dLGCrKhSj82kpkcLcMrmVtX37_9Kly37Jq1TuYZTOv63skz77uDNfjbHLEhSPyQueQlRtIsdU5z32OMx_0SJmP8V9llpm2T40Farr2OUNj_YczX98oC9xIO2aUBGSRPPYQFE5PQxAoNjl478-QeSoo2qNaHYlwlqBmJXOdukA1Kz6GBWKn2KNfp5r8r6x3UQGS_vys54ruwom-ZQbip7AAELesQdqNXiVEvZyg'
     }
     
@@ -485,8 +478,8 @@ def get_co2_savings(system_id: str, start_date: str = None, end_date: str = None
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'AccessKeyId': 'FKIA08F3E94E3D064B629EE82A44C8D1D0A6',
-        'AccessKeyValue': '2f62d6f2-77e6-4796-9fd1-5d74b5c6474c',
+        'AccessKeyId': os.getenv('SOLAR_WEB_ACCESS_KEY_ID'),
+        'AccessKeyValue': os.getenv('SOLAR_WEB_ACCESS_KEY_VALUE'),
         'Authorization': f'Bearer {jwt_token}' if jwt_token else 'Bearer eyJ4NXQiOiJOalpoT0dJMVpqQXpaVGt5TlRVNU1UbG1NVFkzWVRGbU9UWmpObVE0TURnME1HTmlZbU5sWkEiLCJraWQiOiJORFk0TVdaalpqWmhZakpsT1RRek5UTTVObUUwTkRWa016TXpOak16TmpBd1ptUmlNRFZsT1dRMVpHWmxPVEU1TWpSaU1XVXhZek01TURObU1ESXdaUV9SUzI1NiIsImFsZyI6IlJTMjU2In0.eyJhdF9oYXNoIjoiNUt6S0p1N1Q3RXk1VlZ6QWJQTE14dyIsImF1ZCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJzdWIiOiJtb25pdG9yaW5nQGphenpzb2xhci5jb20iLCJuYmYiOjE3NDczMTQyNTMsImF6cCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJhbXIiOlsicGFzc3dvcmQiXSwiaXNzIjoiaHR0cHM6XC9cL2xvZ2luLmZyb25pdXMuY29tXC9vYXV0aDJcL29pZGNkaXNjb3ZlcnkiLCJleHAiOjE3NDczMTc4NTMsImNvbnRhY3RfaWQiOiI2OGRmODA0My03OTI0LWUzMTEtOTc4ZS0wMDUwNTZhMjAwMDMiLCJpYXQiOjE3NDczMTQyNTN9.g9yitwr_6sHLOCRI2TAH7OZ_ibyQznkGmg3oEsdcySag5NYnimo5SY0OXIgTwNhoDkBsvA9BD-EWTN93ED7P1zR4RtUTo3iTJGaH5rTzdk33Tbk0dLGCrKhSj82kpkcLcMrmVtX37_9Kly37Jq1TuYZTOv63skz77uDNfjbHLEhSPyQueQlRtIsdU5z32OMx_0SJmP8V9llpm2T40Farr2OUNj_YczX98oC9xIO2aUBGSRPPYQFE5PQxAoNjl478-QeSoo2qNaHYlwlqBmJXOdukA1Kz6GBWKn2KNfp5r8r6x3UQGS_vys54ruwom-ZQbip7AAELesQdqNXiVEvZyg'
     }
     
@@ -754,7 +747,7 @@ class SolarErrorCodesRAG:
         self.embeddings = OpenAIEmbeddings(api_key=api_key, model="text-embedding-3-small")
         self.vector_store = None
         self.retriever = None
-        self.llm = ChatOpenAI(api_key=api_key, model_name="gpt-3.5-turbo", temperature=0.0)
+        self.llm = ChatOpenAI(api_key=api_key, model_name="gpt-4.1-mini", temperature=0.0)
         # Initialize conversation memories for different users
         self.memories = {}
         
