@@ -662,7 +662,7 @@ export default function PvSystemDetailScreen() {
 
   // Calculate earnings based on energy production and rate of $0.40/kWh
   const calculateEarnings = (energyWh: number | null): string => {
-    if (energyWh === null) return "N/A";
+    if (energyWh === null) return "$0.00";
     // Convert Wh to kWh and multiply by rate
     const earningsDollars = (energyWh / 1000) * 0.4;
     return `$${earningsDollars.toFixed(2)}`;
@@ -679,21 +679,21 @@ export default function PvSystemDetailScreen() {
           value:
             currentPowerOutput !== null
               ? `${(currentPowerOutput / 1000).toFixed(1)} kW`
-              : "N/A",
+              : "0.0 W",
         },
         {
           label: "Energy",
           value:
             dailyEnergyProduction !== null
               ? `${(dailyEnergyProduction / 1000).toFixed(1)} kWh`
-              : "N/A",
+              : "0.0 Wh",
         },
         {
           label: "CO₂ Saved",
           value:
             dailyCo2Savings !== null
               ? `${dailyCo2Savings.toFixed(1)} kg`
-              : "N/A",
+              : "0.0 kg",
         },
         {
           label: "Earnings",
@@ -714,21 +714,21 @@ export default function PvSystemDetailScreen() {
           value:
             currentPowerOutput !== null
               ? `${(currentPowerOutput / 1000).toFixed(1)} kW`
-              : "N/A",
+              : "0.0 W",
         },
         {
           label: "Weekly Energy",
           value:
             weeklyEnergyProduction !== null
               ? `${(weeklyEnergyProduction / 1000).toFixed(1)} kWh`
-              : "N/A",
+              : "0.0 Wh",
         },
         {
           label: "CO₂ Saved",
           value:
             weeklyCo2Savings !== null
               ? `${weeklyCo2Savings.toFixed(1)} kg`
-              : "N/A",
+              : "0.0 kg",
         },
         {
           label: "Earnings",
@@ -749,21 +749,21 @@ export default function PvSystemDetailScreen() {
           value:
             monthlyEnergyProduction !== null
               ? `${(monthlyEnergyProduction / 1000).toFixed(1)} kWh`
-              : "N/A",
+              : "0.0 Wh",
         },
         {
           label: "Avg Daily Energy",
           value:
             monthlyEnergyProduction !== null
               ? `${(monthlyEnergyProduction / 30 / 1000).toFixed(1)} kWh`
-              : "N/A",
+              : "0.0 Wh",
         },
         {
           label: "CO₂ Saved",
           value:
             monthlyCo2Savings !== null
               ? `${monthlyCo2Savings.toFixed(1)} kg`
-              : "N/A",
+              : "0.0 kg",
         },
         {
           label: "Earnings",
@@ -784,21 +784,21 @@ export default function PvSystemDetailScreen() {
           value:
             yearlyEnergyProduction !== null
               ? `${(yearlyEnergyProduction / 1000).toFixed(1)} kWh`
-              : "N/A",
+              : "0.0 Wh",
         },
         {
           label: "Avg Monthly Energy",
           value:
             yearlyEnergyProduction !== null
               ? `${(yearlyEnergyProduction / 12 / 1000).toFixed(1)} kWh`
-              : "N/A",
+              : "0.0 Wh",
         },
         {
           label: "CO₂ Saved",
           value:
             yearlyCo2Savings !== null
               ? `${yearlyCo2Savings.toFixed(1)} kg`
-              : "N/A",
+              : "0.0 kg",
         },
         {
           label: "Earnings",
@@ -1261,7 +1261,7 @@ const chartData = {
       color: (opacity = 1) => `rgba(255, 122, 69, ${opacity})`, // Vibrant orange line color
       strokeWidth: 3,
       // Add dots for fewer data points, hide them when there are many
-      withDots: validData.length <= 31,
+      withDots: false,
     },
   ],
 };
@@ -1291,12 +1291,7 @@ const chartConfig = {
     strokeWidth: 1,
   },
 
-  propsForDots: {
-    r: validData.length > 31 ? "0" : "4",
-    strokeWidth: "2",
-    stroke: "rgba(255, 122, 69, 0.9)",
-    fill: "#fff",
-  },
+ 
 
   formatYLabel: (value: string) => {
     const num = parseFloat(value);
