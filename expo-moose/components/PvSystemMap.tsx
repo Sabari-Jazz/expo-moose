@@ -25,6 +25,15 @@ import { useThemeColor } from "@/hooks/useThemeColor";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 interface PvSystemWithCoords extends PvSystem {
+  coords: {
+    latitude: number;
+    longitude: number;
+  };
+  status: "online" | "warning" | "offline";
+}
+
+// For systems that may have undefined coords
+interface PartialPvSystemWithCoords extends PvSystem {
   coords?: {
     latitude: number;
     longitude: number;
@@ -35,14 +44,18 @@ interface PvSystemWithCoords extends PvSystem {
 interface PvSystemMapProps {
   selectedPvSystemId?: string;
   googleMapsApiKey?: string;
+  hasAccessToSystem?: (systemId: string) => boolean;
+  loading?: boolean;
 }
 
 export default function PvSystemMap({
   selectedPvSystemId,
   googleMapsApiKey,
+  hasAccessToSystem,
+  loading: externalLoading,
 }: PvSystemMapProps) {
   const [pvSystems, setPvSystems] = useState<PvSystemWithCoords[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [internalLoading, setInternalLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [region, setRegion] = useState({
     latitude: 45.4215, // Default to Ottawa, Canada
@@ -54,6 +67,15 @@ export default function PvSystemMap({
   const mapRef = useRef<MapView>(null);
   const router = useRouter();
   const primaryColor = useThemeColor({}, "tint");
+
+  // Debug log for hasAccessToSystem prop
+  useEffect(() => {
+    console.log(`PVMAP: hasAccessToSystem prop is ${hasAccessToSystem ? 'provided' : 'NOT provided'}`);
+    console.log(`PVMAP: External loading state is: ${externalLoading ? 'LOADING' : 'READY'}`);
+  }, [hasAccessToSystem, externalLoading]);
+
+  // Determine if the component is loading
+  const isLoading = externalLoading || internalLoading;
 
   // Simplified color scheme
   const onlineColor = "#4CAF50"; // Green for functioning
@@ -116,17 +138,18 @@ export default function PvSystemMap({
   // Fetch data from API
   const fetchData = async () => {
     try {
-      setLoading(true);
+      setInternalLoading(true);
+      console.log(`PVMAP: Starting to fetch PV system data...`);
 
       const data = await getPvSystems();
 
       if (!data || data.length === 0) {
         setError("No PV systems found. Please check your data source.");
-        setLoading(false);
+        setInternalLoading(false);
         return;
       }
 
-      console.log(`Fetched ${data.length} PV systems from API`);
+      console.log(`PVMAP: Fetched ${data.length} PV systems from API`);
 
       // Process systems with coordinates and status
       const systemsWithCoords = await Promise.all(
@@ -180,15 +203,10 @@ export default function PvSystemMap({
               return null;
             }
 
-            // Determine system status based on API data
-            // In a real app, this would come from the API
-          //  let status: "online" | "warning" | "offline" = "online";
-
             // Set status as offline or online
             let status = "offline";
             if (systemStatus == true) {
-          //    status = systemStatus as "online" | "warning" | "offline";
-              status = "online"
+              status = "online";
             }
 
             return { ...system, coords, status };
@@ -200,20 +218,73 @@ export default function PvSystemMap({
       );
 
       // Filter out systems without coordinates
-      const validSystems = systemsWithCoords.filter(
-        (system): system is PvSystemWithCoords => system !== null && system.coords !== undefined
-      );
+      const validSystems = systemsWithCoords
+        .filter(system => system !== null && system.coords !== undefined)
+        .map(system => ({
+          ...system!,
+          coords: system!.coords!,
+          status: (system!.status || "offline") as "online" | "warning" | "offline"
+        })) as PvSystemWithCoords[];
 
       console.log(
         `Processed ${validSystems.length} systems with valid coordinates`
       );
-
-      setPvSystems(validSystems);
+      
+      // Apply access filtering if provided
+      let accessibleSystems = validSystems;
+      console.log(`PVMAP: Starting with ${validSystems.length} valid systems before access filtering`);
+      
+      // Only apply access filtering if user data is fully loaded and not in loading state
+      if (hasAccessToSystem && !externalLoading) {
+        console.log(`PVMAP: hasAccessToSystem function provided and not loading, will filter systems`);
+        
+        // Log before filtering
+        console.log(`PVMAP: Before filtering: ${validSystems.length} systems with valid coordinates`);
+        
+        try {
+          // Apply access filter with strict error handling
+          const beforeCount = validSystems.length;
+          const filteredSystems = [];
+          
+          for (const system of validSystems) {
+            try {
+              const pvSystemId = system.pvSystemId;
+              const hasAccess = hasAccessToSystem(pvSystemId);
+              console.log(`PVMAP: System ${system.name} (${pvSystemId}) access: ${hasAccess ? 'GRANTED' : 'DENIED'}`);
+              if (hasAccess) {
+                filteredSystems.push(system);
+              }
+            } catch (error) {
+              console.error(`PVMAP: Error checking access for system ${system.name}:`, error);
+              // Do not include system if error occurs during access check
+            }
+          }
+          
+          accessibleSystems = filteredSystems;
+          console.log(`PVMAP: After filtering: User has access to ${accessibleSystems.length} of ${beforeCount} systems on the map`);
+        } catch (error) {
+          console.error("PVMAP: Error during access filtering:", error);
+          // In case of error, show no systems instead of all
+          accessibleSystems = [];
+          console.log("PVMAP: Error occurred - showing no systems for safety");
+        }
+      } else {
+        if (externalLoading) {
+          console.log(`PVMAP: External loading is true, skipping filtering until user data is loaded`);
+          // When loading, don't show any systems until user data is ready
+          accessibleSystems = [];
+        } else {
+          console.log(`PVMAP: No hasAccessToSystem function provided, showing all ${validSystems.length} systems`);
+        }
+      }
+      
+      console.log(`PVMAP: Setting state with ${accessibleSystems.length} accessible systems`);
+      setPvSystems(accessibleSystems);
 
       // Calculate map region to fit all pins
-      if (validSystems.length > 0) {
+      if (accessibleSystems.length > 0) {
         if (selectedPvSystemId) {
-          const selectedSystem = validSystems.find(
+          const selectedSystem = accessibleSystems.find(
             (system) => system.pvSystemId === selectedPvSystemId
           );
           if (selectedSystem?.coords) {
@@ -235,7 +306,7 @@ export default function PvSystemMap({
           let minLng = Number.MAX_VALUE;
           let maxLng = -Number.MAX_VALUE;
 
-          validSystems.forEach((system) => {
+          accessibleSystems.forEach((system) => {
             if (system.coords) {
               minLat = Math.min(minLat, system.coords.latitude);
               maxLat = Math.max(maxLat, system.coords.latitude);
@@ -260,6 +331,14 @@ export default function PvSystemMap({
             longitudeDelta: finalLngDelta,
           });
         }
+      } else if (accessibleSystems.length === 0) {
+        // No systems visible, show a zoomed out view
+        setRegion({
+          latitude: 45.4215, // Default to Ottawa, Canada
+          longitude: -75.6972,
+          latitudeDelta: 10,
+          longitudeDelta: 10,
+        });
       }
 
       setError(null);
@@ -267,7 +346,7 @@ export default function PvSystemMap({
       console.error("Error fetching PV systems:", err);
       setError("Failed to load PV systems. Please try again later.");
     } finally {
-      setLoading(false);
+      setInternalLoading(false);
     }
   };
 
@@ -276,7 +355,7 @@ export default function PvSystemMap({
   }, [selectedPvSystemId]);
 
   useEffect(() => {
-    if (!loading && pvSystems.length > 0 && mapRef.current) {
+    if (!isLoading && pvSystems.length > 0 && mapRef.current) {
       // Add a slight delay to ensure map is ready
       setTimeout(() => {
         try {
@@ -318,9 +397,9 @@ export default function PvSystemMap({
         }
       }, 500);
     }
-  }, [loading, pvSystems]);
+  }, [isLoading, pvSystems]);
 
-  if (loading) {
+  if (isLoading) {
     return (
       <ThemedView style={styles.centered}>
         <ActivityIndicator size="large" color={primaryColor} />
@@ -364,7 +443,7 @@ export default function PvSystemMap({
         showsCompass={true}
         mapType="standard"
         onMapReady={() => {
-          console.log("Map loaded successfully");
+          console.log(`PVMAP: Map loaded successfully with ${pvSystems.length} markers`);
         }}
       >
         {pvSystems.map((system) => {
