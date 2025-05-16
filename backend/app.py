@@ -70,6 +70,8 @@ class ChatMessage(BaseModel):
     """Chat message from the user"""
     message: str
     user_id: Optional[str] = None
+    system_id: Optional[str] = None
+    jwtToken: Optional[str] = None
 
 class SourceDocument(BaseModel):
     """Source document from the RAG system"""
@@ -212,7 +214,7 @@ def process_energy_data(data: Dict[str, Any]) -> Dict[str, Any]:
         # Return original data if processing fails
         return data
 
-def get_energy_production(system_id: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+def get_energy_production(system_id: str, start_date: str = None, end_date: str = None, jwt_token: str = None) -> Dict[str, Any]:
     """
     Gets aggregated energy production data for a specific solar system from the Solar.web API.
     
@@ -220,12 +222,20 @@ def get_energy_production(system_id: str, start_date: str = None, end_date: str 
         system_id: The ID of the system to get data for
         start_date: Start date in YYYY, YYYY-MM, or YYYY-MM-DD format
         end_date: End date in the same format as start_date
+        jwt_token: JWT token for API authentication
         
     Returns:
         A dictionary with energy production data
     """
     
     print(f"Fetching energy production data for system {system_id}, start_date: {start_date}, end_date: {end_date}")
+    
+    # Validate system_id
+    if not system_id:
+        return {
+            "error": "No system ID provided. Please select a system before querying energy production data.",
+            "system_id_required": True
+        }
     
     # Base URL for the Solar.web API
     base_url = f"https://api.solarweb.com/swqapi/pvsystems/{system_id}/aggrdata"
@@ -250,7 +260,7 @@ def get_energy_production(system_id: str, start_date: str = None, end_date: str 
         'Accept': 'application/json',
         'AccessKeyId': 'FKIA08F3E94E3D064B629EE82A44C8D1D0A6',
         'AccessKeyValue': '2f62d6f2-77e6-4796-9fd1-5d74b5c6474c',
-        'Authorization': 'Bearer eyJ4NXQiOiJOalpoT0dJMVpqQXpaVGt5TlRVNU1UbG1NVFkzWVRGbU9UWmpObVE0TURnME1HTmlZbU5sWkEiLCJraWQiOiJORFk0TVdaalpqWmhZakpsT1RRek5UTTVObUUwTkRWa016TXpOak16TmpBd1ptUmlNRFZsT1dRMVpHWmxPVEU1TWpSaU1XVXhZek01TURObU1ESXdaUV9SUzI1NiIsImFsZyI6IlJTMjU2In0.eyJhdF9oYXNoIjoiNUt6S0p1N1Q3RXk1VlZ6QWJQTE14dyIsImF1ZCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJzdWIiOiJtb25pdG9yaW5nQGphenpzb2xhci5jb20iLCJuYmYiOjE3NDczMTQyNTMsImF6cCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJhbXIiOlsicGFzc3dvcmQiXSwiaXNzIjoiaHR0cHM6XC9cL2xvZ2luLmZyb25pdXMuY29tXC9vYXV0aDJcL29pZGNkaXNjb3ZlcnkiLCJleHAiOjE3NDczMTc4NTMsImNvbnRhY3RfaWQiOiI2OGRmODA0My03OTI0LWUzMTEtOTc4ZS0wMDUwNTZhMjAwMDMiLCJpYXQiOjE3NDczMTQyNTN9.g9yitwr_6sHLOCRI2TAH7OZ_ibyQznkGmg3oEsdcySag5NYnimo5SY0OXIgTwNhoDkBsvA9BD-EWTN93ED7P1zR4RtUTo3iTJGaH5rTzdk33Tbk0dLGCrKhSj82kpkcLcMrmVtX37_9Kly37Jq1TuYZTOv63skz77uDNfjbHLEhSPyQueQlRtIsdU5z32OMx_0SJmP8V9llpm2T40Farr2OUNj_YczX98oC9xIO2aUBGSRPPYQFE5PQxAoNjl478-QeSoo2qNaHYlwlqBmJXOdukA1Kz6GBWKn2KNfp5r8r6x3UQGS_vys54ruwom-ZQbip7AAELesQdqNXiVEvZyg'
+        'Authorization': f'Bearer {jwt_token}' if jwt_token else 'Bearer eyJ4NXQiOiJOalpoT0dJMVpqQXpaVGt5TlRVNU1UbG1NVFkzWVRGbU9UWmpObVE0TURnME1HTmlZbU5sWkEiLCJraWQiOiJORFk0TVdaalpqWmhZakpsT1RRek5UTTVObUUwTkRWa016TXpOak16TmpBd1ptUmlNRFZsT1dRMVpHWmxPVEU1TWpSaU1XVXhZek01TURObU1ESXdaUV9SUzI1NiIsImFsZyI6IlJTMjU2In0.eyJhdF9oYXNoIjoiNUt6S0p1N1Q3RXk1VlZ6QWJQTE14dyIsImF1ZCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJzdWIiOiJtb25pdG9yaW5nQGphenpzb2xhci5jb20iLCJuYmYiOjE3NDczMTQyNTMsImF6cCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJhbXIiOlsicGFzc3dvcmQiXSwiaXNzIjoiaHR0cHM6XC9cL2xvZ2luLmZyb25pdXMuY29tXC9vYXV0aDJcL29pZGNkaXNjb3ZlcnkiLCJleHAiOjE3NDczMTc4NTMsImNvbnRhY3RfaWQiOiI2OGRmODA0My03OTI0LWUzMTEtOTc4ZS0wMDUwNTZhMjAwMDMiLCJpYXQiOjE3NDczMTQyNTN9.g9yitwr_6sHLOCRI2TAH7OZ_ibyQznkGmg3oEsdcySag5NYnimo5SY0OXIgTwNhoDkBsvA9BD-EWTN93ED7P1zR4RtUTo3iTJGaH5rTzdk33Tbk0dLGCrKhSj82kpkcLcMrmVtX37_9Kly37Jq1TuYZTOv63skz77uDNfjbHLEhSPyQueQlRtIsdU5z32OMx_0SJmP8V9llpm2T40Farr2OUNj_YczX98oC9xIO2aUBGSRPPYQFE5PQxAoNjl478-QeSoo2qNaHYlwlqBmJXOdukA1Kz6GBWKn2KNfp5r8r6x3UQGS_vys54ruwom-ZQbip7AAELesQdqNXiVEvZyg'
     }
     
     try:
@@ -431,7 +441,7 @@ def process_co2_data(data: Dict[str, Any]) -> Dict[str, Any]:
         # Return original data if processing fails
         return data
 
-def get_co2_savings(system_id: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+def get_co2_savings(system_id: str, start_date: str = None, end_date: str = None, jwt_token: str = None) -> Dict[str, Any]:
     """
     Gets aggregated CO2 savings data for a specific solar system from the Solar.web API.
     
@@ -439,12 +449,20 @@ def get_co2_savings(system_id: str, start_date: str = None, end_date: str = None
         system_id: The ID of the system to get data for
         start_date: Start date in YYYY, YYYY-MM, or YYYY-MM-DD format
         end_date: End date in the same format as start_date
+        jwt_token: JWT token for API authentication
         
     Returns:
         A dictionary with CO2 savings data
     """
     
     print(f"Fetching CO2 savings data for system {system_id}, start_date: {start_date}, end_date: {end_date}")
+    
+    # Validate system_id
+    if not system_id:
+        return {
+            "error": "No system ID provided. Please select a system before querying CO2 savings data.",
+            "system_id_required": True
+        }
     
     # Base URL for the Solar.web API
     base_url = f"https://api.solarweb.com/swqapi/pvsystems/{system_id}/aggrdata"
@@ -469,7 +487,7 @@ def get_co2_savings(system_id: str, start_date: str = None, end_date: str = None
         'Accept': 'application/json',
         'AccessKeyId': 'FKIA08F3E94E3D064B629EE82A44C8D1D0A6',
         'AccessKeyValue': '2f62d6f2-77e6-4796-9fd1-5d74b5c6474c',
-        'Authorization': 'Bearer eyJ4NXQiOiJOalpoT0dJMVpqQXpaVGt5TlRVNU1UbG1NVFkzWVRGbU9UWmpObVE0TURnME1HTmlZbU5sWkEiLCJraWQiOiJORFk0TVdaalpqWmhZakpsT1RRek5UTTVObUUwTkRWa016TXpOak16TmpBd1ptUmlNRFZsT1dRMVpHWmxPVEU1TWpSaU1XVXhZek01TURObU1ESXdaUV9SUzI1NiIsImFsZyI6IlJTMjU2In0.eyJhdF9oYXNoIjoiNUt6S0p1N1Q3RXk1VlZ6QWJQTE14dyIsImF1ZCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJzdWIiOiJtb25pdG9yaW5nQGphenpzb2xhci5jb20iLCJuYmYiOjE3NDczMTQyNTMsImF6cCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJhbXIiOlsicGFzc3dvcmQiXSwiaXNzIjoiaHR0cHM6XC9cL2xvZ2luLmZyb25pdXMuY29tXC9vYXV0aDJcL29pZGNkaXNjb3ZlcnkiLCJleHAiOjE3NDczMTc4NTMsImNvbnRhY3RfaWQiOiI2OGRmODA0My03OTI0LWUzMTEtOTc4ZS0wMDUwNTZhMjAwMDMiLCJpYXQiOjE3NDczMTQyNTN9.g9yitwr_6sHLOCRI2TAH7OZ_ibyQznkGmg3oEsdcySag5NYnimo5SY0OXIgTwNhoDkBsvA9BD-EWTN93ED7P1zR4RtUTo3iTJGaH5rTzdk33Tbk0dLGCrKhSj82kpkcLcMrmVtX37_9Kly37Jq1TuYZTOv63skz77uDNfjbHLEhSPyQueQlRtIsdU5z32OMx_0SJmP8V9llpm2T40Farr2OUNj_YczX98oC9xIO2aUBGSRPPYQFE5PQxAoNjl478-QeSoo2qNaHYlwlqBmJXOdukA1Kz6GBWKn2KNfp5r8r6x3UQGS_vys54ruwom-ZQbip7AAELesQdqNXiVEvZyg'
+        'Authorization': f'Bearer {jwt_token}' if jwt_token else 'Bearer eyJ4NXQiOiJOalpoT0dJMVpqQXpaVGt5TlRVNU1UbG1NVFkzWVRGbU9UWmpObVE0TURnME1HTmlZbU5sWkEiLCJraWQiOiJORFk0TVdaalpqWmhZakpsT1RRek5UTTVObUUwTkRWa016TXpOak16TmpBd1ptUmlNRFZsT1dRMVpHWmxPVEU1TWpSaU1XVXhZek01TURObU1ESXdaUV9SUzI1NiIsImFsZyI6IlJTMjU2In0.eyJhdF9oYXNoIjoiNUt6S0p1N1Q3RXk1VlZ6QWJQTE14dyIsImF1ZCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJzdWIiOiJtb25pdG9yaW5nQGphenpzb2xhci5jb20iLCJuYmYiOjE3NDczMTQyNTMsImF6cCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJhbXIiOlsicGFzc3dvcmQiXSwiaXNzIjoiaHR0cHM6XC9cL2xvZ2luLmZyb25pdXMuY29tXC9vYXV0aDJcL29pZGNkaXNjb3ZlcnkiLCJleHAiOjE3NDczMTc4NTMsImNvbnRhY3RfaWQiOiI2OGRmODA0My03OTI0LWUzMTEtOTc4ZS0wMDUwNTZhMjAwMDMiLCJpYXQiOjE3NDczMTQyNTN9.g9yitwr_6sHLOCRI2TAH7OZ_ibyQznkGmg3oEsdcySag5NYnimo5SY0OXIgTwNhoDkBsvA9BD-EWTN93ED7P1zR4RtUTo3iTJGaH5rTzdk33Tbk0dLGCrKhSj82kpkcLcMrmVtX37_9Kly37Jq1TuYZTOv63skz77uDNfjbHLEhSPyQueQlRtIsdU5z32OMx_0SJmP8V9llpm2T40Farr2OUNj_YczX98oC9xIO2aUBGSRPPYQFE5PQxAoNjl478-QeSoo2qNaHYlwlqBmJXOdukA1Kz6GBWKn2KNfp5r8r6x3UQGS_vys54ruwom-ZQbip7AAELesQdqNXiVEvZyg'
     }
     
     try:
@@ -768,13 +786,15 @@ class SolarErrorCodesRAG:
             )
         return self.memories[user_id]
     
-    def query_with_openai_function_calling(self, query: str, user_id: str = "default_user") -> Dict[str, Any]:
+    def query_with_openai_function_calling(self, query: str, user_id: str = "default_user", system_id: str = None, jwt_token: str = None) -> Dict[str, Any]:
         """
         Query using OpenAI's direct function calling.
         
         Args:
             query: The user's query
             user_id: Identifier for the user
+            system_id: The ID of the solar system to use for function calls (if None, functions requiring system_id will be prompted)
+            jwt_token: JWT token for API authentication
             
         Returns:
             A dictionary with the response and any relevant documents
@@ -793,57 +813,52 @@ class SolarErrorCodesRAG:
         current_year = current_date.strftime("%Y")
         
         # Add system message with current date and specific date ranges
-        messages.append({
-            "role": "system",
-            "content": f"""You are a solar operations and maintenance expert specialized in Fronius inverters, and you work closely with the Lac des Mille Lacs First Nation (LDMLFN) community.
-            
-            
-            ASSUMPTIONS:
-            - Treat the user's community as Lac des Mille Lacs First Nation unless clearly stated otherwise.
-            - When the user refers to "my community," "our energy system," "my location," or similar, interpret this as referring to LDMLFN.
-            
-            SYSTEM ID TRACKING:
-            - You MUST keep track of any system IDs mentioned in the conversation.
-            - There is NO default system ID. If no system ID has been mentioned in the conversation, you MUST ask the user which system they are referring to before calling any functions.
-            - If a specific system ID was mentioned in any previous message, continue to use that same ID in subsequent function calls unless the user explicitly mentions a different system ID.
-            - When calling get_energy_production or get_co2_savings functions, always use the most recently mentioned system ID.
-            - If the user asks about energy production or CO2 savings without mentioning a system ID and none has been mentioned before, respond with something like "I don't know which system you're referring to. Could you please specify the system ID?"
-            - Example: If a user asked about "system ABC123" earlier, and later asks "How much energy did I produce yesterday?" without specifying a system ID, use "ABC123" as the system_id parameter.
-            
-            DATA HANDLING:
-            - The API responses now include pre-calculated total values that you should use directly.
-            - For energy production data, use the "total_energy_kwh" field for the total energy in kilowatt-hours.
-            - For CO2 savings data, use the "total_co2_kg" field for the total CO2 saved in kilograms.
-            - DO NOT attempt to recalculate these totals by summing the individual data points, as this may lead to inconsistent results.
-            - When reporting multiple day values, present them using a consistent format with the same number of decimal places.
-            - For financial calculations, multiply the total_energy_kwh value by $0.40 and present the result with 2 decimal places.
-            
-            TODAY'S DATE IS: {formatted_date} ({current_day_of_week}, {current_month} {current_date.day}, {current_year})
-            
-            DATE GUIDELINES:
-            - Use today's date given above for any date calculations.
-            - A week starts on Monday and ends on Sunday.
-            - "This week" means from Monday of this week up to today.
-            - "Last week" means from Monday to Sunday of the previous week.
-            - "This month" means from the 1st of the current month to today.
-            - "Last month" means the entire previous month.
-            - "This year" means from January 1st of the current year to today.
-            - "Last year" means the entire previous year.
-            - When calling get_energy_production or get_co2_savings, convert these terms to actual dates.
-            - The API requires dates in these formats:
-              * For daily data: YYYY-MM-DD (e.g., "2023-05-15")
-              * For monthly data: YYYY-MM (e.g., "2023-05")
-              * For yearly data: YYYY (e.g., "2023")
-            - Important: start_date and end_date must have the SAME format (both YYYY, both YYYY-MM, or both YYYY-MM-DD).
+        system_message = f"""You are a solar operations and maintenance expert specialized in Fronius inverters, and you work closely with the Lac des Mille Lacs First Nation (LDMLFN) community.
+        
+        ASSUMPTIONS:
+        - Treat the user's community as Lac des Mille Lacs First Nation unless clearly stated otherwise.
+        - When the user refers to "my community," "our energy system," "my location," or similar, interpret this as referring to LDMLFN.
+        
+        SYSTEM ID INSTRUCTIONS:
+        - For any function that requires a system_id, use the system_id that is passed to you: {system_id if system_id else "None"}
+        - If system_id is None and the user asks about energy production or CO2 savings, inform them that they need to select a system first.
+        - Do NOT attempt to infer or extract a system_id from conversation history. Use ONLY the provided system_id value.
+        
+        DATA HANDLING:
+        - The API responses now include pre-calculated total values that you should use directly.
+        - For energy production data, use the "total_energy_kwh" field for the total energy in kilowatt-hours.
+        - For CO2 savings data, use the "total_co2_kg" field for the total CO2 saved in kilograms.
+        - DO NOT attempt to recalculate these totals by summing the individual data points, as this may lead to inconsistent results.
+        - When reporting multiple day values, present them using a consistent format with the same number of decimal places.
+        - For financial calculations, multiply the total_energy_kwh value by $0.40 and present the result with 2 decimal places.
+        
+        TODAY'S DATE IS: {formatted_date} ({current_day_of_week}, {current_month} {current_date.day}, {current_year})
+        
+        DATE GUIDELINES:
+        - Use today's date given above for any date calculations.
+        - A week starts on Monday and ends on Sunday.
+        - "This week" means from Monday of this week up to today.
+        - "Last week" means from Monday to Sunday of the previous week.
+        - "This month" means from the 1st of the current month to today.
+        - "Last month" means the entire previous month.
+        - "This year" means from January 1st of the current year to today.
+        - "Last year" means the entire previous year.
+        - When calling get_energy_production or get_co2_savings, convert these terms to actual dates.
+        - The API requires dates in these formats:
+          * For daily data: YYYY-MM-DD (e.g., "2023-05-15")
+          * For monthly data: YYYY-MM (e.g., "2023-05")
+          * For yearly data: YYYY (e.g., "2023")
+        - Important: start_date and end_date must have the SAME format (both YYYY, both YYYY-MM, or both YYYY-MM-DD).
 
-            USE THESE DATE FORMATS WITH API CALLS:
-            - For specific days like "yesterday": Use YYYY-MM-DD format for both start_date and end_date
-            - For specific months like "January 2023": Use YYYY-MM format for both start_date and end_date
-            - For specific years like "2022": Use YYYY format for both start_date and end_date
-            - For date ranges: Make sure both dates use the SAME format
+        USE THESE DATE FORMATS WITH API CALLS:
+        - For specific days like "yesterday": Use YYYY-MM-DD format for both start_date and end_date
+        - For specific months like "January 2023": Use YYYY-MM format for both start_date and end_date
+        - For specific years like "2022": Use YYYY format for both start_date and end_date
+        - For date ranges: Make sure both dates use the SAME format
 
-            When users ask about financial earnings or money saved, use the get_energy_production function to get the energy data and then multiply the total_energy_kwh value by $0.40 to calculate the earnings. For example, if energy production is 100 kWh, earnings would be $40.00."""
-        })
+        When users ask about financial earnings or money saved, use the get_energy_production function to get the energy data and then multiply the total_energy_kwh value by $0.40 to calculate the earnings. For example, if energy production is 100 kWh, earnings would be $40.00."""
+        
+        messages.append({"role": "system", "content": system_message})
         print('INSIDE FUNCTION CALLING')
         
         # Add conversation history
@@ -856,9 +871,6 @@ class SolarErrorCodesRAG:
         
         # Add current query
         messages.append({"role": "user", "content": query})
-        
-        # Get updated function specs for current date
-
         
         # Call OpenAI API with function calling and updated specs
         try:
@@ -885,6 +897,11 @@ class SolarErrorCodesRAG:
                 for tool_call in response_message.tool_calls:
                     function_name = tool_call.function.name
                     function_args = json.loads(tool_call.function.arguments)
+                    
+                    # Override system_id with the one provided in the request, if applicable
+                    if system_id and function_name in ["get_energy_production", "get_co2_savings"]:
+                        function_args["system_id"] = system_id
+                        function_args["jwt_token"] = jwt_token  # Add JWT token to function args
                     
                     # Execute the function
                     function_to_call = FUNCTION_MAP.get(function_name)
@@ -979,13 +996,14 @@ class SolarErrorCodesRAG:
                 "source_documents": []
             }
     
-    def query_error_codes(self, query: str, user_id: str = "default_user") -> Dict[str, Any]:
+    def query_error_codes(self, query: str, user_id: str = "default_user", system_id: str = None) -> Dict[str, Any]:
         """
         Query the error codes knowledge base with conversation history.
         
         Args:
             query: The user's query about an error code or issue
             user_id: Identifier for the user to maintain conversation history
+            system_id: The ID of the solar system to use for function calls
             
         Returns:
             A dictionary with the response and relevant documents
@@ -993,7 +1011,7 @@ class SolarErrorCodesRAG:
         # Use OpenAI function calling for all queries
         print('INSIDE ERROR CODE QUERY')
         try:
-            return self.query_with_openai_function_calling(query, user_id)
+            return self.query_with_openai_function_calling(query, user_id, system_id)
         except Exception as e:
             print(f"Error in query_error_codes: {e}")
             return {
@@ -1019,15 +1037,15 @@ def get_rag_instance():
 # Chat Response Functions
 #---------------------------------------
 
-
-
-def get_error_code_response(message: str, user_id: str = "default_user") -> Optional[Dict[str, Any]]:
+def get_error_code_response(message: str, user_id: str = "default_user", system_id: str = None, jwt_token: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Get a response for an error code query using the RAG system.
     
     Args:
         message: The user's message
         user_id: User identifier for maintaining conversation context
+        system_id: The ID of the solar system to use for function calls
+        jwt_token: Optional JWT token for API authentication
         
     Returns:
         A dictionary with response and source documents, or None if RAG is unavailable
@@ -1039,18 +1057,20 @@ def get_error_code_response(message: str, user_id: str = "default_user") -> Opti
     
     # Query the RAG system
     try:
-        return rag.query_error_codes(message, user_id)
+        return rag.query_with_openai_function_calling(message, user_id, system_id, jwt_token)
     except Exception as e:
         print(f"Error querying RAG system: {e}")
         return None
 
-def get_chatbot_response(message: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+def get_chatbot_response(message: str, user_id: Optional[str] = None, system_id: Optional[str] = None, jwt_token: Optional[str] = None) -> Dict[str, Any]:
     """
     Generate a response based on the user's message.
     
     Args:
         message: The user's message
         user_id: Optional user identifier for maintaining conversation context
+        system_id: The ID of the solar system to use for function calls
+        jwt_token: Optional JWT token for API authentication
     
     Returns:
         A dictionary with response and optional source documents
@@ -1062,11 +1082,15 @@ def get_chatbot_response(message: str, user_id: Optional[str] = None) -> Dict[st
     
     # Initialize user context if it doesn't exist
     if user_id not in user_contexts:
-        user_contexts[user_id] = {"last_topic": None}
+        user_contexts[user_id] = {"current_system_id": None, "last_topic": None}
+    
+    # Update user context with system_id if provided
+    if system_id:
+        user_contexts[user_id]["current_system_id"] = system_id
     
     # Convert message to lowercase for easier matching
     message_lower = message.lower()
-    rag_result = get_error_code_response(message, user_id)
+    rag_result = get_error_code_response(message, user_id, system_id, jwt_token)
     return rag_result
 
 #---------------------------------------
@@ -1080,9 +1104,21 @@ async def root():
 @app.post("/chat", response_model=ChatResponse)
 async def chat(chat_message: ChatMessage):
     try:
-        print("INSIED MAIN")
-        # Get response from chatbot
-        result = get_chatbot_response(chat_message.message, chat_message.user_id)
+        print("INSIDE MAIN")
+        print("======== INCOMING CHAT REQUEST ========")
+        print(f"Raw request data: {chat_message}")
+        print(f"Message: {chat_message.message}")
+        print(f"User ID: {chat_message.user_id}")
+        print(f"System ID: {chat_message.system_id}")
+        print(f"JWT: {chat_message.jwtToken}")
+        print("======================================")
+        
+        # Extract system_id and user_id from the request
+        system_id = chat_message.system_id
+        user_id = chat_message.user_id or "default_user"
+        
+        # Get response from chatbot, passing the system_id directly
+        result = get_chatbot_response(chat_message.message, user_id, system_id, chat_message.jwtToken)
         
         # Process source documents if present
         source_documents = []

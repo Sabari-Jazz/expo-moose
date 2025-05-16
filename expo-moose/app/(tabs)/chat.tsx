@@ -10,11 +10,12 @@ import {
   TouchableOpacity,
   Keyboard,
   Modal,
+  ScrollView,
+  KeyboardAvoidingView,
 } from "react-native";
 import axios from "axios";
 import Markdown from "react-native-markdown-display"; // Import the markdown display library
 import { Image } from "expo-image";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/hooks/useTheme";
 import { Ionicons } from "@expo/vector-icons";
 import KeyboardAwareView from "@/components/KeyboardAwareView";
@@ -24,9 +25,18 @@ import { User } from "@/utils/auth";
 import { getAccessibleSystems } from "@/utils/auth";
 import * as api from "@/api/api";
 import { Picker } from '@react-native-picker/picker';
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import Animated, { 
+  useAnimatedStyle, 
+  useSharedValue, 
+  withTiming, 
+  Easing 
+} from 'react-native-reanimated';
 
 // --- API Configuration ---
 const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
+//const API_URL = "http://172.17.49.217:8000/chat";
 
 // --- API Call Function ---
 interface ChatRequest {
@@ -48,11 +58,12 @@ interface SourceDocument {
 
 const getChatResponse = async (message: string, username: string, systemId: string | null): Promise<string> => {
   try {
+    const jwtToken = await getJwtToken();
     const requestData = {
       message: message,
       username: username,
       system_id: systemId,
-      jwtToken: await getJwtToken(),
+      jwtToken: jwtToken,
     } as ChatRequest;
     
     console.log("Sending API request with data:", JSON.stringify(requestData, null, 2));
@@ -83,15 +94,6 @@ const getChatResponse = async (message: string, username: string, systemId: stri
   }
 };
 
-// --- Loading Messages ---
-const LOADING_MESSAGES = [
-  "Formulating answer...",
-  "Consulting knowledge base...",
-  "Checking sources...",
-  "Running calculations...",
-  "Compiling response...",
-];
-
 // --- The Chat Screen Component ---
 interface ChatMessage {
   role: "user" | "assistant";
@@ -106,12 +108,18 @@ interface PvSystem {
 
 export default function ChatScreen() {
   const { isDarkMode, colors } = useTheme();
-  const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState("");
+  const [dotCount, setDotCount] = useState(1); // For animated dots
+  
+  // Replace direct state management with animated values
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const keyboardHeight = useSharedValue(0);
+  const inputBottomPosition = useSharedValue(tabBarHeight);
+  const loadingBottomPosition = useSharedValue(tabBarHeight + 60);
+  
   const flatListRef = useRef<FlatList>(null);
   const loadingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<TextInput>(null);
@@ -121,6 +129,20 @@ export default function ChatScreen() {
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
   const [loadingSystems, setLoadingSystems] = useState(true);
   const [showSystemModal, setShowSystemModal] = useState(false);
+
+  // Define animated styles for the input container
+  const animatedInputStyle = useAnimatedStyle(() => {
+    return {
+      bottom: inputBottomPosition.value,
+    };
+  });
+
+  // Define animated styles for the loading indicator 
+  const animatedLoadingStyle = useAnimatedStyle(() => {
+    return {
+      bottom: loadingBottomPosition.value,
+    };
+  });
 
   // Set a default selected system if none is selected
   useEffect(() => {
@@ -190,67 +212,81 @@ export default function ChatScreen() {
     loadUserAndSystems();
   }, []);
 
-  // Keyboard listeners
+  // Enhanced keyboard listener with smooth animations
   useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener(
-      "keyboardDidShow",
-      () => {
+    const keyboardWillShowListener = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        // Start the animation as soon as keyboard starts appearing
+        const kbHeight = e.endCoordinates.height;
+        keyboardHeight.value = kbHeight;
+        
+        // Animate the input position smoothly with proper timing and easing
+        inputBottomPosition.value = withTiming(kbHeight, {
+          duration: Platform.OS === 'ios' ? 300 : 100,
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        });
+        
+        // Also animate the loading indicator position
+        loadingBottomPosition.value = withTiming(kbHeight + 60, {
+          duration: Platform.OS === 'ios' ? 300 : 100,
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        });
+        
         setKeyboardVisible(true);
+        
+        // Scroll to bottom
         if (flatListRef.current && messages.length > 0) {
-          flatListRef.current.scrollToEnd({ animated: true });
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
         }
       }
     );
-    const keyboardDidHideListener = Keyboard.addListener(
-      "keyboardDidHide",
+    
+    const keyboardWillHideListener = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
       () => {
+        // Animate back to original position
+        inputBottomPosition.value = withTiming(tabBarHeight, {
+          duration: Platform.OS === 'ios' ? 250 : 100,
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        });
+        
+        // Also animate the loading indicator
+        loadingBottomPosition.value = withTiming(tabBarHeight + 60, {
+          duration: Platform.OS === 'ios' ? 250 : 100,
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        });
+        
+        keyboardHeight.value = 0;
         setKeyboardVisible(false);
       }
     );
 
     return () => {
-      keyboardDidShowListener.remove();
-      keyboardDidHideListener.remove();
+      keyboardWillShowListener.remove();
+      keyboardWillHideListener.remove();
     };
-  }, [messages.length]);
+  }, [tabBarHeight, messages.length]);
 
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    if (flatListRef.current && messages.length > 0) {
-      flatListRef.current.scrollToEnd({ animated: true });
-    }
-  }, [messages]);
-
-  // Effect to handle loading message updates
+  // Replace the loading message effect with dot animation
   useEffect(() => {
     if (isLoading) {
-      // Pick an initial message immediately
-      setLoadingMessage(
-        LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)]
-      );
-      // Start interval to change message periodically
+      // Animate dots (1, 2, 3 dots in sequence)
       loadingIntervalRef.current = setInterval(() => {
-        setLoadingMessage((prevMessage) => {
-          let newMessage;
-          do {
-            newMessage =
-              LOADING_MESSAGES[
-                Math.floor(Math.random() * LOADING_MESSAGES.length)
-              ];
-          } while (newMessage === prevMessage); // Avoid showing the same message twice in a row
-          return newMessage;
-        });
-      }, 2500); // Change message every 2.5 seconds
+        setDotCount((prev) => (prev >= 3 ? 1 : prev + 1));
+      }, 500); // Update every 500ms
     } else {
-      // Clear interval and message when not loading
+      // Clear interval when not loading
       if (loadingIntervalRef.current) {
         clearInterval(loadingIntervalRef.current);
         loadingIntervalRef.current = null;
       }
-      setLoadingMessage("");
+      setDotCount(1); // Reset to one dot
     }
 
-    // Cleanup function to clear interval when component unmounts or isLoading changes
+    // Cleanup function
     return () => {
       if (loadingIntervalRef.current) {
         clearInterval(loadingIntervalRef.current);
@@ -655,113 +691,130 @@ export default function ChatScreen() {
   };
 
   return (
-    <KeyboardAwareView
-      style={[
-        styles.container,
-        { backgroundColor: isDarkMode ? colors.background : "#fff" },
-      ]}
-      contentContainerStyle={{
-        paddingTop: insets.top,
-      }}
-      bottomTabBarHeight={Platform.OS === "android" ? 90 : 80}
-      extraScrollHeight={120}
-      dismissKeyboardOnTouch={false}
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -tabBarHeight} // iOS handles better with 0, Android needs negative offset
     >
-      {/* System Selector */}
-      {renderSystemSelector()}
-      
-      {messages.length === 0 ? (
-        // Show initial prompts when no messages
-        renderInitialPrompts()
-      ) : (
-        // Show chat messages
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(_, index) => index.toString()}
-          contentContainerStyle={[
-            styles.messagesContainer,
-            { paddingBottom: keyboardVisible ? 120 : 120 },
-          ]}
-        />
-      )}
-
-      {/* Loading indicator */}
-      {isLoading && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={[styles.loadingText, { color: colors.text }]}>
-            {loadingMessage}
-          </Text>
-        </View>
-      )}
-
-      {/* Input area */}
-      <View
+      <SafeAreaView 
         style={[
-          styles.inputContainer,
-          {
-            backgroundColor: isDarkMode ? colors.card : "#f9f9f9",
-            borderTopColor: isDarkMode ? colors.border : "#e0e0e0",
-            paddingBottom: Math.max(
-              insets.bottom + (Platform.OS === "ios" ? 25 : 15),
-              20
-            ),
-          },
+          styles.innerContainer,
+          { backgroundColor: isDarkMode ? colors.background : "#fff" }
         ]}
+        edges={['top', 'left', 'right']}
       >
-        <TextInput
-          ref={inputRef}
+        {/* System Selector */}
+        {renderSystemSelector()}
+        
+        {/* Messages or Initial Prompts */}
+        <View style={styles.contentContainer}>
+          {messages.length === 0 ? (
+            <ScrollView contentContainerStyle={styles.initialPromptsScrollContainer}>
+              {renderInitialPrompts()}
+            </ScrollView>
+          ) : (
+            <FlatList
+              ref={flatListRef}
+              data={messages}
+              renderItem={renderMessage}
+              keyExtractor={(_, index) => index.toString()}
+              contentContainerStyle={styles.messagesContainer}
+              onContentSizeChange={() => {
+                flatListRef.current?.scrollToEnd({ animated: false });
+              }}
+              keyboardShouldPersistTaps="handled"
+            />
+          )}
+          
+          {/* Loading indicator */}
+          {isLoading && (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.loadingText, { color: colors.text }]}>
+                Thinking{".".repeat(dotCount)}
+              </Text>
+            </View>
+          )}
+        </View>
+        
+        {/* Input Bar - Always at the bottom, moves with keyboard */}
+        <View 
           style={[
-            styles.input,
+            styles.inputContainer,
             {
-              backgroundColor: isDarkMode ? colors.background : "#fff",
-              color: colors.text,
-              borderColor: isDarkMode ? colors.border : "#e0e0e0",
-            },
+              backgroundColor: isDarkMode ? colors.card : "#f9f9f9",
+              borderTopColor: isDarkMode ? colors.border : "#e0e0e0",
+            }
           ]}
-          value={input}
-          onChangeText={setInput}
-          placeholder="Type a message..."
-          placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
-          multiline
-        />
-        <TouchableOpacity
-          style={[
-            styles.sendButton,
-            {
-              backgroundColor: input.trim()
-                ? colors.primary
-                : isDarkMode
-                ? "#444"
-                : "#e0e0e0",
-              opacity: isLoading ? 0.5 : 1,
-            },
-          ]}
-          onPress={() => handleSend()}
-          disabled={isLoading || !input.trim()}
         >
-          <Ionicons
-            name="send"
-            size={20}
-            color={input.trim() ? "#fff" : isDarkMode ? "#aaa" : "#999"}
+          <TextInput
+            ref={inputRef}
+            style={[
+              styles.input,
+              {
+                backgroundColor: isDarkMode ? colors.background : "#fff",
+                color: colors.text,
+                borderColor: isDarkMode ? colors.border : "#e0e0e0",
+              },
+            ]}
+            value={input}
+            onChangeText={setInput}
+            placeholder="Type a message..."
+            placeholderTextColor={isDarkMode ? "#888" : "#aaa"}
+            multiline
           />
-        </TouchableOpacity>
-      </View>
-    </KeyboardAwareView>
+          <TouchableOpacity
+            style={[
+              styles.sendButton,
+              {
+                backgroundColor: input.trim()
+                  ? colors.primary
+                  : isDarkMode
+                  ? "#444"
+                  : "#e0e0e0",
+                opacity: isLoading ? 0.5 : 1,
+              },
+            ]}
+            onPress={() => handleSend()}
+            disabled={isLoading || !input.trim()}
+          >
+            <Ionicons
+              name="send"
+              size={20}
+              color={input.trim() ? "#fff" : isDarkMode ? "#aaa" : "#999"}
+            />
+          </TouchableOpacity>
+        </View>
+        
+        {/* Bottom spacer to account for tab bar - only show when keyboard is hidden */}
+        {!keyboardVisible && <View style={{ height: tabBarHeight }} />}
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
-// --- Styles ---
+// Completely revised styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  innerContainer: {
+    flex: 1,
+  },
+  contentContainer: {
+    flex: 1,
+    position: 'relative',
+  },
   messagesContainer: {
-    flexGrow: 1,
     padding: 16,
     paddingTop: 10,
+    paddingBottom: 20,
+  },
+  initialPromptsScrollContainer: {
+    flexGrow: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
   },
   messageBubble: {
     padding: 12,
@@ -792,13 +845,17 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   loadingContainer: {
+    position: 'absolute',
+    bottom: 10,
+    left: 0,
+    right: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     padding: 10,
     backgroundColor: "rgba(0,0,0,0.03)",
     borderRadius: 8,
-    margin: 10,
+    marginHorizontal: 10,
   },
   loadingText: {
     marginLeft: 10,
@@ -808,7 +865,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingVertical: 10,
     borderTopWidth: 1,
   },
   input: {
@@ -818,6 +875,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     fontSize: 16,
+    maxHeight: 100,
   },
   sendButton: {
     marginLeft: 10,
