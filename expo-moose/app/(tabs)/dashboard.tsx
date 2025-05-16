@@ -991,7 +991,7 @@ export default function DashboardScreen() {
                 style={{ color: colors.primary, fontWeight: "400" }}
               >
                 {" "}
-                (Restricted Access)
+                (Restricted Access v1.04)
               </Text>
             )}
         </Text>
