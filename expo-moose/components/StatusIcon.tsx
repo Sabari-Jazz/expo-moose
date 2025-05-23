@@ -3,6 +3,7 @@ import { StyleSheet, View, Text, ActivityIndicator } from "react-native";
 import { useTheme } from "@/hooks/useTheme";
 import { getPvSystemMessages, SystemMessage, getPvSystemFlowData } from "@/api/api";
 import { getErrorCodesInfo, getMostSevereColor, ErrorCode } from "@/services/errorCodesService";
+import { useSession, SystemStatus } from "@/utils/sessionContext";
 
 interface StatusIconProps {
   systemId?: string;
@@ -12,7 +13,8 @@ interface StatusIconProps {
 const STATUS_COLORS = {
   online: "#4CAF50", // Green
   warning: "#FF9800", // Orange
-  offline: "#F44336", // Red
+  error: "#F44336", // Red for errors
+  offline: "#9E9E9E", // Gray for offline
 };
 
 // Use React.memo to prevent unnecessary re-renders
@@ -20,6 +22,7 @@ const StatusIcon = React.memo(({
   systemId = ""
 }: StatusIconProps) => {
   const { isDarkMode, colors } = useTheme();
+  const { updateSystemStatus, lastStatusUpdates } = useSession();
   const [statusColor, setStatusColor] = useState("");
   const [statusText, setStatusText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -28,51 +31,65 @@ const StatusIcon = React.memo(({
   const isMounted = useRef(true);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastFetchTime = useRef<number>(0);
+  const statusRef = useRef<SystemStatus | null>(null);
   
   // Function to get and update status color based on error codes
   const updateStatusColor = useCallback(async (codes: number[], isOnline: boolean) => {
     if (!isMounted.current) return;
     
     try {
-      // If system is offline, that's highest priority - set to red and return
+      let newStatus: SystemStatus = "online";
+      
+      // If system is offline, that's highest priority
       if (!isOnline) {
-        console.log("StatusIcon: System is offline, setting status to red");
+        console.log("StatusIcon: System is offline, setting status to offline");
         setStatusColor(STATUS_COLORS.offline);
         setStatusText("Offline");
-        setIsLoading(false);
-        return;
-      }
-      
-      setStatusText("Online");
-      
-      // If no error codes, system is online and healthy
-      if (!codes.length) {
+        newStatus = "offline";
+      } else if (!codes.length) {
+        // If no error codes, system is online and healthy
         console.log("StatusIcon: No error codes to check, setting status to green");
         setStatusColor(STATUS_COLORS.online);
-        setIsLoading(false);
-        return;
-      }
-
-      // Get error codes info from database
-      const errorCodesInfo = await getErrorCodesInfo(codes);
-      
-      if (!isMounted.current) return;
-      
-      // Get most severe color
-      const colorName = getMostSevereColor(errorCodesInfo);
-      
-      console.log(`StatusIcon: Most severe color for error codes: ${colorName || 'none found, defaulting to green'}`);
-      
-      // Map color name to actual color value
-      if (colorName === 'red') {
-        setStatusColor(STATUS_COLORS.offline);
-        setStatusText("Error");
-      } else if (colorName === 'yellow') {
-        setStatusColor(STATUS_COLORS.warning);
-        setStatusText("Warning");
+        setStatusText("Online");
+        newStatus = "online";
       } else {
-        // If no color found or null or green, default to green
-        setStatusColor(STATUS_COLORS.online);
+        // Get error codes info from database
+        const errorCodesInfo = await getErrorCodesInfo(codes);
+        
+        if (!isMounted.current) return;
+        
+        // Get most severe color
+        const colorName = getMostSevereColor(errorCodesInfo);
+        
+        console.log(`StatusIcon: Most severe color for error codes: ${colorName || 'none found, defaulting to green'}`);
+        
+        // Set default text to Online
+        setStatusText("Online");
+        
+        // Map color name to actual color value
+        if (colorName === 'red') {
+          setStatusColor(STATUS_COLORS.error);
+          setStatusText("Error");
+          newStatus = "error";
+        } else if (colorName === 'yellow') {
+          setStatusColor(STATUS_COLORS.warning);
+          setStatusText("Warning");
+          newStatus = "warning";
+        } else {
+          // If no color found or null or green, default to green
+          setStatusColor(STATUS_COLORS.online);
+          newStatus = "online";
+        }
+      }
+      
+      // Only update system status if it's changed to avoid unnecessary context updates
+      if (statusRef.current !== newStatus) {
+        statusRef.current = newStatus;
+        
+        // Update global context with this system's status (context has its own throttling)
+        if (systemId) {
+          updateSystemStatus(systemId, newStatus);
+        }
       }
       
       setIsLoading(false);
@@ -83,8 +100,14 @@ const StatusIcon = React.memo(({
       // Default to green on error
       setStatusColor(STATUS_COLORS.online);
       setIsLoading(false);
+      
+      // Only update status if it's changed
+      if (statusRef.current !== "online" && systemId) {
+        statusRef.current = "online";
+        updateSystemStatus(systemId, "online");
+      }
     }
-  }, []);
+  }, [systemId, updateSystemStatus]);
   
   const fetchStatus = useCallback(async (force = false) => {
     if (!isMounted.current || !systemId) return;
@@ -94,18 +117,26 @@ const StatusIcon = React.memo(({
       setIsLoading(true);
     }
     
-    // Throttle API calls to prevent excessive requests
+    // Check for context-level throttling - if we updated recently, don't fetch again
+    const lastContextUpdate = lastStatusUpdates[systemId];
     const now = Date.now();
-    if (!force && (now - lastFetchTime.current < 30000)) { // 30 seconds minimum between non-forced calls
-      console.log("StatusIcon: Throttling API call, last call was too recent");
+    
+    // Local throttling
+    if (!force && (now - lastFetchTime.current < 30000)) {
+      console.log("StatusIcon: Throttling API call, last local fetch was too recent");
+      return;
+    }
+    
+    // Context throttling - if the context was updated recently, don't bother fetching
+    if (!force && lastContextUpdate && (now - lastContextUpdate < 30000)) {
+      console.log("StatusIcon: Throttling API call, status was updated in context recently");
       return;
     }
     
     lastFetchTime.current = now;
     
     try {
-      // Get date from 7 days ago in ISO format
-   
+      // Get date from yesterday in ISO format
       const today = new Date();
       const yesterday = new Date(today);
       yesterday.setDate(today.getDate() - 1);
@@ -117,7 +148,7 @@ const StatusIcon = React.memo(({
       
       if (!isMounted.current) return;
       
-      // Fetch error messages from the last 7 days
+      // Fetch error messages from the last day
       const response = await getPvSystemMessages(systemId, {
         statetype: "Error", // lowercase as per API definition
         from: fromDate
@@ -161,7 +192,7 @@ const StatusIcon = React.memo(({
       setStatusColor(STATUS_COLORS.online);
       setIsLoading(false);
     }
-  }, [systemId, updateStatusColor]);
+  }, [systemId, updateStatusColor, lastStatusUpdates]);
 
   // Setup effect - runs when component mounts or systemId changes
   useEffect(() => {
@@ -172,11 +203,16 @@ const StatusIcon = React.memo(({
     if (systemId) {
       fetchStatus(true);
       
-      // Set up interval
+      // Set up interval - but ensure we don't create duplicate intervals
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      
       intervalRef.current = setInterval(() => {
         if (!isMounted.current) return;
         fetchStatus(false);
-      }, 5 * 60 * 1000); // 5 minutes
+      }, 10 * 60 * 1000); // 10 minutes - increased to reduce API calls
+      console.log(`StatusIcon: Set up polling for system ${systemId} every 10 minutes`);
     } else {
       // No system ID, so we're not going to load anything
       setIsLoading(false);
@@ -184,6 +220,7 @@ const StatusIcon = React.memo(({
     
     // Cleanup on unmount
     return () => {
+      console.log(`StatusIcon: Cleaning up component for system ${systemId}`);
       // Mark as unmounted
       isMounted.current = false;
       

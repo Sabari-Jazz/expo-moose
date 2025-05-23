@@ -28,6 +28,7 @@ import * as api from "@/api/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getCurrentUser, getAccessibleSystems } from "@/utils/auth";
 import StatusIcon from "@/components/StatusIcon";
+import SummaryStatusIcon from "@/components/SummaryStatusIcon";
 
 interface EnhancedPvSystem {
   id: string;
@@ -1073,6 +1074,13 @@ export default function DashboardScreen() {
         )}
       </View>
 
+      {/* Summary Status Icon - positioned below systems found text */}
+      {!loading && !error && filteredSystems.length > 0 && (
+        <View style={styles.summaryStatusContainer}>
+          <SummaryStatusIcon showCount={true} />
+        </View>
+      )}
+
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -1343,5 +1351,9 @@ const styles = StyleSheet.create({
   },
   cardContentContainer: {
     paddingTop: 12,
+  },
+  summaryStatusContainer: {
+    marginBottom: 8,
+    alignItems: "center",
   },
 });
