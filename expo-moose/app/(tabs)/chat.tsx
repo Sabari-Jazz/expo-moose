@@ -27,22 +27,19 @@ import * as api from "@/api/api";
 import { Picker } from '@react-native-picker/picker';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
-import Animated, { 
-  useAnimatedStyle, 
-  useSharedValue, 
-  withTiming, 
-  Easing 
-} from 'react-native-reanimated';
+import Constants from "expo-constants";
 
 // --- API Configuration ---
-const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
+//const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
 //const API_URL = "http://172.17.49.217:8000/chat";
-
+const API_URL = 
+  Constants.expoConfig?.extra?.awsApiUrl || 
+  process.env.AWS_API_URL;
 // --- API Call Function ---
 interface ChatRequest {
+  username: string;
   message: string;
-  username?: string;
-  system_id?: string | null;
+  user_id?: string;
   jwtToken?: string;
 }
 
@@ -56,14 +53,21 @@ interface SourceDocument {
   metadata?: any;
 }
 
-const getChatResponse = async (message: string, username: string, systemId: string | null): Promise<string> => {
+const getChatResponse = async (message: string, userId: string, systemId: string | null, username: string = 'Guest User', sessionDeviceId: string): Promise<string> => {
   try {
     const jwtToken = await getJwtToken();
+    
+    // Use the provided session device ID to ensure consistency between calls
+    
+    // Combine the user ID, device ID, and system ID into a single identifier
+    // Format: userId_deviceId_systemId
+    const combinedId = `${userId}_${sessionDeviceId}${systemId ? `_${systemId}` : ''}`;
+    
     const requestData = {
-      message: message,
       username: username,
-      system_id: systemId,
-      jwtToken: jwtToken,
+      message: message,
+      user_id: combinedId,
+      jwtToken: jwtToken
     } as ChatRequest;
     
     console.log("Sending API request with data:", JSON.stringify(requestData, null, 2));
@@ -106,6 +110,206 @@ interface PvSystem {
   name: string;
 }
 
+// System Selector Props Interface
+interface SystemSelectorProps {
+  systems: PvSystem[];
+  selectedSystemId: string | null;
+  setSelectedSystemId: (id: string) => void;
+  loadingSystems: boolean;
+  isDarkMode: boolean;
+  colors: any; // Using any for theme colors
+  showSystemModal: boolean;
+  setShowSystemModal: (show: boolean) => void;
+}
+
+// System Selector Component
+const SystemSelector = ({ 
+  systems, 
+  selectedSystemId, 
+  setSelectedSystemId, 
+  loadingSystems, 
+  isDarkMode, 
+  colors, 
+  showSystemModal, 
+  setShowSystemModal 
+}: SystemSelectorProps) => {
+  if (loadingSystems) {
+    return (
+      <View style={styles.systemSelectorContainer}>
+        <Text style={[styles.systemSelectorLabel, { color: colors.text }]}>
+          Loading systems...
+        </Text>
+        <ActivityIndicator size="small" color={colors.primary} />
+      </View>
+    );
+  }
+  
+  if (systems.length === 0) {
+    return (
+      <View style={styles.systemSelectorContainer}>
+        <Text style={[styles.systemSelectorLabel, { color: colors.text }]}>
+          No systems available
+        </Text>
+      </View>
+    );
+  }
+
+  const currentSystem = systems.find((s: PvSystem) => s.id === selectedSystemId);
+  const currentSystemName = currentSystem ? currentSystem.name : "Select system";
+
+  return (
+    <View style={styles.systemSelectorContainer}>
+      <Text style={[styles.systemSelectorLabel, { color: colors.text }]}>
+        Select a system:
+      </Text>
+
+      {/* Dropdown button - only for iOS */}
+      {Platform.OS === 'ios' && (
+        <TouchableOpacity
+          style={[
+            styles.dropdownButton,
+            { 
+              backgroundColor: isDarkMode ? colors.card : '#f5f5f5',
+              borderColor: colors.primary,
+              borderWidth: 1,
+            }
+          ]}
+          onPress={() => setShowSystemModal(true)}
+        >
+          <Text style={[styles.dropdownButtonText, { color: colors.text }]}>
+            {currentSystemName}
+          </Text>
+          <Ionicons 
+            name="chevron-down" 
+            size={18} 
+            color={colors.text} 
+          />
+        </TouchableOpacity>
+      )}
+      
+      {/* System selection modal for iOS */}
+      {Platform.OS === 'ios' && (
+        <Modal
+          visible={showSystemModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowSystemModal(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setShowSystemModal(false)}
+          >
+            <View 
+              style={[
+                styles.modalContent, 
+                {
+                  backgroundColor: isDarkMode ? colors.card : '#fff',
+                  borderColor: colors.border,
+                }
+              ]}
+            >
+              <Text 
+                style={[
+                  styles.modalTitle, 
+                  { color: colors.text }
+                ]}
+              >
+                Select a System
+              </Text>
+              
+              <FlatList
+                data={systems}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[
+                      styles.modalItem,
+                      selectedSystemId === item.id && {
+                        backgroundColor: isDarkMode 
+                          ? 'rgba(59, 130, 246, 0.2)' 
+                          : 'rgba(59, 130, 246, 0.1)'
+                      }
+                    ]}
+                    onPress={() => {
+                      setSelectedSystemId(item.id);
+                      setShowSystemModal(false);
+                    }}
+                  >
+                    <Text style={[styles.modalItemText, { color: colors.text }]}>
+                      {item.name}
+                    </Text>
+                    {selectedSystemId === item.id && (
+                      <Ionicons name="checkmark" size={24} color={colors.primary} />
+                    )}
+                  </TouchableOpacity>
+                )}
+              />
+              
+              <TouchableOpacity
+                style={[
+                  styles.closeButton,
+                  { backgroundColor: colors.primary }
+                ]}
+                onPress={() => setShowSystemModal(false)}
+              >
+                <Text style={styles.closeButtonText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+      
+      {/* Android native Picker */}
+      {Platform.OS === 'android' && (
+        <View style={[
+          styles.pickerContainer, 
+          { 
+            backgroundColor: isDarkMode ? colors.background : '#f5f5f5',
+            borderColor: colors.primary,
+            borderWidth: 1,
+          }
+        ]}>
+          <Picker
+            selectedValue={selectedSystemId}
+            onValueChange={(value: string | null) => {
+              if (value) { // Ensure value is not null
+                setSelectedSystemId(value);
+              }
+            }}
+            style={[
+              styles.picker, 
+              { 
+                color: colors.text,
+                // Add specific styles to fix text positioning
+                textAlignVertical: 'center',
+              }
+            ]}
+            itemStyle={{ 
+              height: 55, 
+              fontSize: 16,
+              fontFamily: 'sans-serif',
+            }}
+            dropdownIconColor={colors.primary}
+          >
+            {systems.map((system: PvSystem) => (
+              <Picker.Item 
+                key={system.id} 
+                label={system.name}
+                value={system.id}
+                // Add style to improve vertical centering and visibility
+                style={{
+                  fontSize: 16,
+                }}
+              />
+            ))}
+          </Picker>
+        </View>
+      )}
+    </View>
+  );
+};
+
 export default function ChatScreen() {
   const { isDarkMode, colors } = useTheme();
   const tabBarHeight = useBottomTabBarHeight();
@@ -114,35 +318,23 @@ export default function ChatScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [dotCount, setDotCount] = useState(1); // For animated dots
   
+  // Add state to track Android keyboard height
+  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
+  
   // Replace direct state management with animated values
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const keyboardHeight = useSharedValue(0);
-  const inputBottomPosition = useSharedValue(tabBarHeight);
-  const loadingBottomPosition = useSharedValue(tabBarHeight + 60);
   
   const flatListRef = useRef<FlatList>(null);
   const loadingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<TextInput>(null);
   const userId = useRef(`user_${Math.random().toString(36).substring(2, 9)}`);
+  // Generate a device identifier that remains consistent for the entire session
+  const deviceId = useRef(`device_${Platform.OS}_${Math.random().toString(36).substring(2, 9)}`);
   const [user, setUser] = useState<Omit<User, 'password'> | null>(null);
   const [systems, setSystems] = useState<PvSystem[]>([]);
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
   const [loadingSystems, setLoadingSystems] = useState(true);
   const [showSystemModal, setShowSystemModal] = useState(false);
-
-  // Define animated styles for the input container
-  const animatedInputStyle = useAnimatedStyle(() => {
-    return {
-      bottom: inputBottomPosition.value,
-    };
-  });
-
-  // Define animated styles for the loading indicator 
-  const animatedLoadingStyle = useAnimatedStyle(() => {
-    return {
-      bottom: loadingBottomPosition.value,
-    };
-  });
 
   // Set a default selected system if none is selected
   useEffect(() => {
@@ -212,26 +404,20 @@ export default function ChatScreen() {
     loadUserAndSystems();
   }, []);
 
-  // Enhanced keyboard listener with smooth animations
+  // Enhanced keyboard listener
   useEffect(() => {
     const keyboardWillShowListener = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (e) => {
-        // Start the animation as soon as keyboard starts appearing
-        const kbHeight = e.endCoordinates.height;
-        keyboardHeight.value = kbHeight;
+        // Log keyboard height but use tabBarHeight value
+        const keyboardHeight = Math.max(0, e.endCoordinates.height);
+        console.log(`Keyboard SHOW event fired - Platform: ${Platform.OS}, Height: ${e.endCoordinates.height}`);
+        console.log(`Using tabBarHeight: ${tabBarHeight} instead of keyboard height: ${keyboardHeight}`);
         
-        // Animate the input position smoothly with proper timing and easing
-        inputBottomPosition.value = withTiming(kbHeight, {
-          duration: Platform.OS === 'ios' ? 300 : 100,
-          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-        });
-        
-        // Also animate the loading indicator position
-        loadingBottomPosition.value = withTiming(kbHeight + 60, {
-          duration: Platform.OS === 'ios' ? 300 : 100,
-          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-        });
+        // For Android, use tabBarHeight
+        if (Platform.OS === 'android') {
+          setAndroidKeyboardHeight(tabBarHeight); // Use exact tabBarHeight
+        }
         
         setKeyboardVisible(true);
         
@@ -247,19 +433,13 @@ export default function ChatScreen() {
     const keyboardWillHideListener = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
       () => {
-        // Animate back to original position
-        inputBottomPosition.value = withTiming(tabBarHeight, {
-          duration: Platform.OS === 'ios' ? 250 : 100,
-          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-        });
+        console.log(`Keyboard HIDE event fired - Platform: ${Platform.OS}`);
         
-        // Also animate the loading indicator
-        loadingBottomPosition.value = withTiming(tabBarHeight + 60, {
-          duration: Platform.OS === 'ios' ? 250 : 100,
-          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-        });
+        // Reset Android keyboard height
+        if (Platform.OS === 'android') {
+          setAndroidKeyboardHeight(0);
+        }
         
-        keyboardHeight.value = 0;
         setKeyboardVisible(false);
       }
     );
@@ -268,7 +448,7 @@ export default function ChatScreen() {
       keyboardWillShowListener.remove();
       keyboardWillHideListener.remove();
     };
-  }, [tabBarHeight, messages.length]);
+  }, [messages.length]);
 
   // Replace the loading message effect with dot animation
   useEffect(() => {
@@ -317,8 +497,10 @@ export default function ChatScreen() {
       // Pass the selected system ID to the API if one is selected
       const responseMessage = await getChatResponse(
         contentToSend, 
-        user?.name || 'default_user',
-        selectedSystemId
+        user?.id || 'default_user',
+        selectedSystemId,
+        user?.name || 'Guest User',
+        deviceId.current
       );
       
       const assistantMessage: ChatMessage = {
@@ -506,206 +688,43 @@ export default function ChatScreen() {
             styles.promptButton,
             { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
           ]}
-          onPress={() => handlePromptClick(`How often should I maintain my system${systemText}?`)}
+          onPress={() => handlePromptClick(`How much did I make last month?${systemText}?`)}
           disabled={isLoading}
         >
           <Text style={[styles.promptButtonText, { color: colors.text }]}>
-            How often should I maintain my system?
+            How much did I make last month?
           </Text>
         </TouchableOpacity>
-      </View>
-    );
-  };
-
-  // Render the system selector
-  const renderSystemSelector = () => {
-    console.log("Rendering system selector with systems:", systems);
-    console.log("Loading systems state:", loadingSystems);
-    console.log("Selected system ID:", selectedSystemId);
-    
-    if (loadingSystems) {
-      return (
-        <View style={styles.systemSelectorContainer}>
-          <Text style={[styles.systemSelectorLabel, { color: colors.text }]}>
-            Loading systems...
-          </Text>
-          <ActivityIndicator size="small" color={colors.primary} />
-        </View>
-      );
-    }
-    
-    if (systems.length === 0) {
-      console.log("No systems available to show in selector");
-      return (
-        <View style={styles.systemSelectorContainer}>
-          <Text style={[styles.systemSelectorLabel, { color: colors.text }]}>
-            No systems available
-          </Text>
-        </View>
-      );
-    }
-
-    const currentSystem = systems.find(s => s.id === selectedSystemId);
-    const currentSystemName = currentSystem ? currentSystem.name : "Select system";
-
-    return (
-      <View style={styles.systemSelectorContainer}>
-        <Text style={[styles.systemSelectorLabel, { color: colors.text }]}>
-          Select a system:
-        </Text>
-
-        {/* Dropdown button - works on both iOS and Android */}
-        <TouchableOpacity
-          style={[
-            styles.dropdownButton,
-            { 
-              backgroundColor: isDarkMode ? colors.card : '#f5f5f5',
-              borderColor: colors.primary,
-              borderWidth: 1,
-            }
-          ]}
-          onPress={() => {
-            // On iOS, show a modal with the system options
-            if (Platform.OS === 'ios') {
-              setShowSystemModal(true);
-            }
-            // On Android, this just draws focus to the native picker
-          }}
-        >
-          <Text style={[styles.dropdownButtonText, { color: colors.text }]}>
-            {currentSystemName}
-          </Text>
-          <Ionicons 
-            name="chevron-down" 
-            size={18} 
-            color={colors.text} 
-          />
-        </TouchableOpacity>
-        
-        {/* System selection modal for iOS */}
-        {Platform.OS === 'ios' && (
-          <Modal
-            visible={showSystemModal}
-            transparent={true}
-            animationType="slide"
-            onRequestClose={() => setShowSystemModal(false)}
-          >
-            <TouchableOpacity
-              style={styles.modalOverlay}
-              activeOpacity={1}
-              onPress={() => setShowSystemModal(false)}
-            >
-              <View 
-                style={[
-                  styles.modalContent, 
-                  {
-                    backgroundColor: isDarkMode ? colors.card : '#fff',
-                    borderColor: colors.border,
-                  }
-                ]}
-              >
-                <Text 
-                  style={[
-                    styles.modalTitle, 
-                    { color: colors.text }
-                  ]}
-                >
-                  Select a System
-                </Text>
-                
-                <FlatList
-                  data={systems}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={[
-                        styles.modalItem,
-                        selectedSystemId === item.id && {
-                          backgroundColor: isDarkMode 
-                            ? 'rgba(59, 130, 246, 0.2)' 
-                            : 'rgba(59, 130, 246, 0.1)'
-                        }
-                      ]}
-                      onPress={() => {
-                        setSelectedSystemId(item.id);
-                        setShowSystemModal(false);
-                      }}
-                    >
-                      <Text style={[styles.modalItemText, { color: colors.text }]}>
-                        {item.name}
-                      </Text>
-                      {selectedSystemId === item.id && (
-                        <Ionicons name="checkmark" size={24} color={colors.primary} />
-                      )}
-                    </TouchableOpacity>
-                  )}
-                />
-                
-                <TouchableOpacity
-                  style={[
-                    styles.closeButton,
-                    { backgroundColor: colors.primary }
-                  ]}
-                  onPress={() => setShowSystemModal(false)}
-                >
-                  <Text style={styles.closeButtonText}>Close</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          </Modal>
-        )}
-        
-        {/* Android native Picker */}
-        {Platform.OS !== 'ios' && (
-          <View style={[
-            styles.pickerContainer, 
-            { 
-              backgroundColor: isDarkMode ? colors.background : '#f5f5f5',
-              borderColor: colors.primary,
-              borderWidth: 1,
-            }
-          ]}>
-            <Picker
-              selectedValue={selectedSystemId}
-              onValueChange={(value: string | null) => {
-                if (value) { // Ensure value is not null
-                  console.log("System selected:", value);
-                  setSelectedSystemId(value);
-                }
-              }}
-              style={[styles.picker, { color: colors.text }]}
-              dropdownIconColor={colors.primary}
-            >
-              {systems.map(system => (
-                <Picker.Item 
-                  key={system.id} 
-                  label={system.name} 
-                  value={system.id} 
-                />
-              ))}
-            </Picker>
-          </View>
-        )}
       </View>
     );
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : -tabBarHeight} // iOS handles better with 0, Android needs negative offset
+    <SafeAreaView 
+      style={[
+        styles.innerContainer,
+        { backgroundColor: isDarkMode ? colors.background : "#fff" }
+      ]}
+      edges={['top', 'left', 'right']}
     >
-      <SafeAreaView 
-        style={[
-          styles.innerContainer,
-          { backgroundColor: isDarkMode ? colors.background : "#fff" }
-        ]}
-        edges={['top', 'left', 'right']}
+      {/* System Selector - Now outside KeyboardAvoidingView */}
+      <SystemSelector 
+        systems={systems}
+        selectedSystemId={selectedSystemId}
+        setSelectedSystemId={setSelectedSystemId}
+        loadingSystems={loadingSystems}
+        isDarkMode={isDarkMode}
+        colors={colors}
+        showSystemModal={showSystemModal}
+        setShowSystemModal={setShowSystemModal}
+      />
+      
+      {/* KeyboardAvoidingView now only wraps the chat content and input */}
+      <KeyboardAvoidingView
+        style={[styles.container, { flex: 1 }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+        keyboardVerticalOffset={0}
       >
-        {/* System Selector */}
-        {renderSystemSelector()}
-        
         {/* Messages or Initial Prompts */}
         <View style={styles.contentContainer}>
           {messages.length === 0 ? (
@@ -744,6 +763,8 @@ export default function ChatScreen() {
             {
               backgroundColor: isDarkMode ? colors.card : "#f9f9f9",
               borderTopColor: isDarkMode ? colors.border : "#e0e0e0",
+              // Add dynamic marginBottom for Android
+              ...(Platform.OS === 'android' && { marginBottom: androidKeyboardHeight })
             }
           ]}
         >
@@ -787,9 +808,12 @@ export default function ChatScreen() {
         </View>
         
         {/* Bottom spacer to account for tab bar - only show when keyboard is hidden */}
-        {!keyboardVisible && <View style={{ height: tabBarHeight }} />}
-      </SafeAreaView>
-    </KeyboardAvoidingView>
+        {!keyboardVisible && (() => {
+          console.log(`Bottom spacer rendering - tabBarHeight: ${tabBarHeight}`);
+          return <View style={{ height: tabBarHeight }} />;
+        })()}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -867,6 +891,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderTopWidth: 1,
+    ...Platform.select({
+      android: {
+        position: 'relative', // Relative positioning for Android
+      }
+    })
   },
   input: {
     flex: 1,
@@ -930,10 +959,25 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
     marginBottom: 5,
+    ...Platform.select({
+      android: {
+        marginBottom: 10,
+        elevation: 2,
+        height: 55, // Increased height even more
+        paddingTop: 2,
+      }
+    })
   },
   picker: {
     height: 45,
     width: '100%',
+    ...Platform.select({
+      android: {
+        height: 60, // Explicitly set height for Android picker
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+      }
+    })
   },
   dropdownButton: {
     flexDirection: 'row',

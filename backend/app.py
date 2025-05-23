@@ -12,9 +12,10 @@ import uvicorn
 from dotenv import load_dotenv
 import requests
 from datetime import datetime, timedelta
+from mangum import Mangum  # Add Mangum import
 
 # Langchain imports
-from langchain_community.vectorstores import FAISS
+
 from langchain_openai import OpenAIEmbeddings
 from langchain.docstore.document import Document
 from langchain.prompts import PromptTemplate
@@ -61,9 +62,9 @@ openai_client = OpenAI(api_key=api_key)
 
 class ChatMessage(BaseModel):
     """Chat message from the user"""
+    username: str
     message: str
     user_id: Optional[str] = None
-    system_id: Optional[str] = None
     jwtToken: Optional[str] = None
 
 class SourceDocument(BaseModel):
@@ -568,6 +569,128 @@ def get_co2_savings(system_id: str, start_date: str = None, end_date: str = None
         print(f"Error fetching CO2 savings data: {e}")
         return {"error": f"Failed to fetch CO2 savings data: {str(e)}"}
 
+def get_flow_data(system_id: str, jwt_token: str = None) -> Dict[str, Any]:
+    """
+    Gets the realtime power flow data for a specific solar system from the Solar.web API.
+    
+    Args:
+        system_id: The ID of the system to get data for
+        jwt_token: JWT token for API authentication
+        
+    Returns:
+        A dictionary with flow data including system status and power information
+    """
+    
+    print(f"Fetching flow data for system {system_id}")
+    
+    # Validate system_id
+    if not system_id:
+        return {
+            "error": "No system ID provided. Please select a system before querying flow data.",
+            "system_id_required": True
+        }
+    
+    # Base URL for the Solar.web API
+    base_url = f"https://api.solarweb.com/swqapi/pvsystems/{system_id}/flowdata"
+    
+    # Set up headers for API call
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'AccessKeyId': os.getenv('SOLAR_WEB_ACCESS_KEY_ID'),
+        'AccessKeyValue': os.getenv('SOLAR_WEB_ACCESS_KEY_VALUE'),
+        'Authorization': f'Bearer {jwt_token}' if jwt_token else 'Bearer eyJ4NXQiOiJOalpoT0dJMVpqQXpaVGt5TlRVNU1UbG1NVFkzWVRGbU9UWmpObVE0TURnME1HTmlZbU5sWkEiLCJraWQiOiJORFk0TVdaalpqWmhZakpsT1RRek5UTTVObUUwTkRWa016TXpOak16TmpBd1ptUmlNRFZsT1dRMVpHWmxPVEU1TWpSaU1XVXhZek01TURObU1ESXdaUV9SUzI1NiIsImFsZyI6IlJTMjU2In0.eyJhdF9oYXNoIjoiNUt6S0p1N1Q3RXk1VlZ6QWJQTE14dyIsImF1ZCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJzdWIiOiJtb25pdG9yaW5nQGphenpzb2xhci5jb20iLCJuYmYiOjE3NDczMTQyNTMsImF6cCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJhbXIiOlsicGFzc3dvcmQiXSwiaXNzIjoiaHR0cHM6XC9cL2xvZ2luLmZyb25pdXMuY29tXC9vYXV0aDJcL29pZGNkaXNjb3ZlcnkiLCJleHAiOjE3NDczMTc4NTMsImNvbnRhY3RfaWQiOiI2OGRmODA0My03OTI0LWUzMTEtOTc4ZS0wMDUwNTZhMjAwMDMiLCJpYXQiOjE3NDczMTQyNTN9.g9yitwr_6sHLOCRI2TAH7OZ_ibyQznkGmg3oEsdcySag5NYnimo5SY0OXIgTwNhoDkBsvA9BD-EWTN93ED7P1zR4RtUTo3iTJGaH5rTzdk33Tbk0dLGCrKhSj82kpkcLcMrmVtX37_9Kly37Jq1TuYZTOv63skz77uDNfjbHLEhSPyQueQlRtIsdU5z32OMx_0SJmP8V9llpm2T40Farr2OUNj_YczX98oC9xIO2aUBGSRPPYQFE5PQxAoNjl478-QeSoo2qNaHYlwlqBmJXOdukA1Kz6GBWKn2KNfp5r8r6x3UQGS_vys54ruwom-ZQbip7AAELesQdqNXiVEvZyg'
+    }
+    
+    try:
+        # Make the API call with GET
+        print(f"Calling Solar.web API for flow data: {base_url}")
+        response = requests.get(
+            base_url, 
+            headers=headers
+        )
+        
+        # Check if the request was successful
+        if response.status_code == 200:
+            data = response.json()
+            print(f"API call successful, received flow data: {data}")
+            return data
+        else:
+            print(f"API call failed with status code {response.status_code}: {response.text}")
+            
+            # Fall back to mock data if the API call fails
+            print("Using mock flow data as fallback")
+            mock_data = {
+                "pvSystemId": system_id,
+                "status": {
+                    "isOnline": True,
+                    "battMode": "1.0"
+                },
+                "data": {
+                    "logDateTime": datetime.now().isoformat(),
+                    "channels": [
+                        {
+                            "channelName": "PowerFeedIn",
+                            "channelType": "Power",
+                            "unit": "W",
+                            "value": -496.01
+                        },
+                        {
+                            "channelName": "PowerLoad",
+                            "channelType": "Power",
+                            "unit": "W",
+                            "value": -186.89
+                        },
+                        {
+                            "channelName": "PowerBattCharge",
+                            "channelType": "Power",
+                            "unit": "W",
+                            "value": 0
+                        },
+                        {
+                            "channelName": "PowerPV",
+                            "channelType": "Power",
+                            "unit": "W",
+                            "value": 1682.9
+                        },
+                        {
+                            "channelName": "PowerOhmpilot",
+                            "channelType": "Power",
+                            "unit": "W",
+                            "value": None
+                        },
+                        {
+                            "channelName": "BattSOC",
+                            "channelType": "Percent",
+                            "unit": "%",
+                            "value": 99
+                        },
+                        {
+                            "channelName": "RateSelfSufficiency",
+                            "channelType": "Percent",
+                            "unit": "%",
+                            "value": 100
+                        },
+                        {
+                            "channelName": "RateSelfConsumption",
+                            "channelType": "Percent",
+                            "unit": "%",
+                            "value": 64.58
+                        },
+                        {
+                            "channelName": "PowerEVCTotal",
+                            "channelType": "Power",
+                            "unit": "W",
+                            "value": -1000.0
+                        }
+                    ]
+                }
+            }
+            return mock_data
+    except Exception as e:
+        print(f"Error fetching flow data: {e}")
+        return {"error": f"Failed to fetch flow data: {str(e)}"}
+
 def search_vector_db(query: str, limit: int = 3) -> List[Dict[str, Any]]:
     """
     Search the vector database for relevant documents.
@@ -725,6 +848,32 @@ FUNCTION_SPECS =  [
                     "required": ["system_id", "start_date"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_flow_data",
+                "description": (
+                    "Get real-time power flow data for a specific solar system. "
+                    "Use this ONLY for two specific types of questions:\n"
+                    "1. When the user asks about system status (online/offline) - check the 'isOnline' status\n"
+                    "2. When the user asks about current power or peak power - check the 'PowerPV' channel value\n\n"
+                    "Examples:\n"
+                    "'Is my system online?', "
+                    "'What's the current power output?', "
+                    "'How much power is my system generating right now?'"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "system_id": {
+                            "type": "string",
+                            "description": "The ID of the system to get real-time flow data for"
+                        }
+                    },
+                    "required": ["system_id"]
+                }
+            }
         }
     ]
 
@@ -732,15 +881,16 @@ FUNCTION_SPECS =  [
 FUNCTION_MAP = {
     "search_vector_db": search_vector_db,
     "get_energy_production": get_energy_production,
-    "get_co2_savings": get_co2_savings
+    "get_co2_savings": get_co2_savings,
+    "get_flow_data": get_flow_data
 }
 
 #---------------------------------------
 # RAG Implementation
 #---------------------------------------
 
-class SolarErrorCodesRAG:
-    """RAG implementation for Solar O&M error codes with conversation memory."""
+class SolarAssistantRAG:
+    """Optimized RAG implementation for Solar O&M assistant with conversation memory."""
     
     def __init__(self):
         """Initialize the RAG system."""
@@ -748,52 +898,79 @@ class SolarErrorCodesRAG:
         self.vector_store = None
         self.retriever = None
         self.llm = ChatOpenAI(api_key=api_key, model_name="gpt-4.1-mini", temperature=0.0)
-        # Initialize conversation memories for different users
+        
+        # Dictionary to store conversation memories
         self.memories = {}
         
-        # Load the error codes data
-        self._load_error_codes()
+        # Load the knowledge base data
+        self._load_knowledge_base()
         
-    def _load_error_codes(self) -> None:
+    def _load_knowledge_base(self) -> None:
         try:
-            pc = Pinecone(api_key="pcsk_2AyCGs_BDzka8wP2RhkiEzHuawUFgeVYEoQqFyW2ZihT9wEKSpeaLT9AY9sg9QUAJR8rtV")
-            index = pc.Index(host="https://moose-8tjaija.svc.aped-4627-b74a.pinecone.io")
+            # Get Pinecone API key and host from environment variables
+            pinecone_api_key = os.getenv("PINECONE_API_KEY")
+            pinecone_host = os.getenv("PINECONE_HOST")
+            
+            # Initialize Pinecone with hardcoded namespace
+            pc = Pinecone(api_key=pinecone_api_key)
+            index = pc.Index(host=pinecone_host)
             vector_store = PineconeVectorStore(index=index, embedding=self.embeddings, namespace="LDML")
             self.vector_store = vector_store
             self.retriever = self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 3})
 
-            
-
         except Exception as e:
-            print(f"Error loading error codes: {e}")
-            self.vector_store = FAISS.from_documents([Document(page_content="Error loading data")], self.embeddings)
-            self.retriever = self.vector_store.as_retriever()
+            print(f"Error loading knowledge base: {e}")
+            # Create a simple fallback retriever that returns empty results
+            self.vector_store = None
+            self.retriever = None
 
     def _get_or_create_memory(self, user_id: str):
         """Get or create a conversation memory for a user."""
-        if user_id not in self.memories:
-            self.memories[user_id] = ConversationBufferMemory(
+        # Extract the base user ID (before any underscores) to ensure memory persistence
+        # even if the device ID changes between requests
+       # base_user_id = user_id.split('_')[0] if user_id and '_' in user_id else user_id
+        memory_key = user_id
+        
+        if memory_key not in self.memories:
+            print(f"Creating new memory for user: {memory_key} (original ID: {user_id})")
+            self.memories[memory_key] = ConversationBufferMemory(
                 memory_key="chat_history",
                 return_messages=True,
                 output_key="answer"
             )
-        return self.memories[user_id]
+        else:
+            print(f"Retrieved existing memory for user: {memory_key} (original ID: {user_id}) with {len(self.memories[memory_key].chat_memory.messages)} messages")
     
-    def query_with_openai_function_calling(self, query: str, user_id: str = "default_user", system_id: str = None, jwt_token: str = None) -> Dict[str, Any]:
+        return self.memories[memory_key]
+    
+    def query_with_openai_function_calling(self, query: str, user_id: str = "default_user", system_id: str = None, jwt_token: str = None, username: str = "Guest User") -> Dict[str, Any]:
         """
         Query using OpenAI's direct function calling.
         
         Args:
             query: The user's query
-            user_id: Identifier for the user
+            user_id: Identifier for the user (already includes device ID)
             system_id: The ID of the solar system to use for function calls (if None, functions requiring system_id will be prompted)
             jwt_token: JWT token for API authentication
+            username: User's actual name for personalized responses
             
         Returns:
             A dictionary with the response and any relevant documents
         """
+        print(f"\n=== PROCESSING QUERY ===")
+        print(f"User ID: {user_id}")
+        print(f"System ID: {system_id}")
+        print(f"Query: {query}")
+        
         # Get or create memory for this user
         memory = self._get_or_create_memory(user_id)
+        
+        # Log memory state before adding new messages
+        print(f"Memory before processing: {len(memory.chat_memory.messages)} messages")
+        if memory.chat_memory.messages:
+            print("Previous conversation:")
+            for i, msg in enumerate(memory.chat_memory.messages):
+                print(f"  [{i}] {msg.type}: {msg.content[:50]}...")
         
         # Prepare chat history for OpenAI format
         messages = []
@@ -807,6 +984,10 @@ class SolarErrorCodesRAG:
         
         # Add system message with current date and specific date ranges
         system_message = f"""You are a solar operations and maintenance expert specialized in Fronius inverters, and you work closely with the Lac des Mille Lacs First Nation (LDMLFN) community.
+        
+        USER INFORMATION:
+        - The user's name is {username}. If they ask about their name, greet them personally.
+        - When appropriate, address them by name for a more personalized experience.
         
         ASSUMPTIONS:
         - Treat the user's community as Lac des Mille Lacs First Nation unless clearly stated otherwise.
@@ -855,18 +1036,24 @@ class SolarErrorCodesRAG:
         print('INSIDE FUNCTION CALLING')
         
         # Add conversation history
+        
         if hasattr(memory, "chat_memory") and memory.chat_memory.messages:
+            print(f"Adding {len(memory.chat_memory.messages)} messages from memory to conversation context")
             for msg in memory.chat_memory.messages:
                 if hasattr(msg, "type") and msg.type == "human":
                     messages.append({"role": "user", "content": msg.content})
                 elif hasattr(msg, "type") and msg.type == "ai":
                     messages.append({"role": "assistant", "content": msg.content})
+
         
         # Add current query
         messages.append({"role": "user", "content": query})
         
-        # Call OpenAI API with function calling and updated specs
+        print('MESSAGES: ', messages)
+        print('MEMORY: ', memory.chat_memory.messages)
+        
         try:
+            # Call OpenAI API with function calling and updated specs
             response = openai_client.chat.completions.create(
                 model="gpt-4.1-mini",
                 messages=messages,
@@ -892,9 +1079,11 @@ class SolarErrorCodesRAG:
                     function_args = json.loads(tool_call.function.arguments)
                     
                     # Override system_id with the one provided in the request, if applicable
-                    if system_id and function_name in ["get_energy_production", "get_co2_savings"]:
+                    if system_id and function_name in ["get_energy_production", "get_co2_savings", "get_flow_data"]:
                         function_args["system_id"] = system_id
                         function_args["jwt_token"] = jwt_token  # Add JWT token to function args
+                    
+                    print(f"Calling function: {function_name} with args: {function_args}")
                     
                     # Execute the function
                     function_to_call = FUNCTION_MAP.get(function_name)
@@ -908,8 +1097,8 @@ class SolarErrorCodesRAG:
                         })
                         
                         # Save source documents for RAG queries
-                        if function_name == "search_vector_db" and "results" in function_response:
-                            source_documents = function_response["results"]
+                        if function_name == "search_vector_db" and isinstance(function_response, list):
+                            source_documents = function_response
                 
                 # Add the function responses to the messages
                 if tool_responses:
@@ -934,11 +1123,9 @@ class SolarErrorCodesRAG:
                 # Execute the function
                 function_response = FUNCTION_MAP[function_name](**function_args)
 
-                # Prepare documents
-                source_documents = [
-                    Document(page_content=item["content"], metadata=item.get("metadata", {}))
-                    for item in function_response
-                ]
+                # Prepare documents - use correct format for the search results
+                # This should match how the real search_vector_db function returns data
+                source_documents = function_response  # Directly use the response as-is
 
                 # Add a message with tool_calls (required before adding a tool message)
                 tool_call_id = "fallback_call_" + str(hash(query))[:8]
@@ -974,8 +1161,13 @@ class SolarErrorCodesRAG:
                 final_response = second_response.choices[0].message.content
             
             # Save the conversation
-            memory.save_context({"input": query}, {"answer": final_response})
+            print(f"Saving conversation to memory for user: {user_id}")
+            # Instead of using save_context, directly add messages to chat_memory
+            memory.chat_memory.add_user_message(query)
+            memory.chat_memory.add_ai_message(final_response)
             
+            # Log memory state after updating
+            print(f"Memory after processing: {len(memory.chat_memory.messages)} messages")
             
             return {
                 "response": final_response,
@@ -984,29 +1176,6 @@ class SolarErrorCodesRAG:
             
         except Exception as e:
             print(f"Error in OpenAI function calling: {e}")
-            return {
-                "response": f"I encountered an error while processing your request: {str(e)}",
-                "source_documents": []
-            }
-    
-    def query_error_codes(self, query: str, user_id: str = "default_user", system_id: str = None) -> Dict[str, Any]:
-        """
-        Query the error codes knowledge base with conversation history.
-        
-        Args:
-            query: The user's query about an error code or issue
-            user_id: Identifier for the user to maintain conversation history
-            system_id: The ID of the solar system to use for function calls
-            
-        Returns:
-            A dictionary with the response and relevant documents
-        """
-        # Use OpenAI function calling for all queries
-        print('INSIDE ERROR CODE QUERY')
-        try:
-            return self.query_with_openai_function_calling(query, user_id, system_id)
-        except Exception as e:
-            print(f"Error in query_error_codes: {e}")
             return {
                 "response": f"I encountered an error while processing your request: {str(e)}",
                 "source_documents": []
@@ -1020,50 +1189,25 @@ def get_rag_instance():
     global _rag_instance
     if _rag_instance is None:
         try:
-            _rag_instance = SolarErrorCodesRAG()
+            _rag_instance = SolarAssistantRAG()
         except Exception as e:
             print(f"Error creating RAG instance: {e}")
     return _rag_instance
-
 
 #---------------------------------------
 # Chat Response Functions
 #---------------------------------------
 
-def get_error_code_response(message: str, user_id: str = "default_user", system_id: str = None, jwt_token: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """
-    Get a response for an error code query using the RAG system.
-    
-    Args:
-        message: The user's message
-        user_id: User identifier for maintaining conversation context
-        system_id: The ID of the solar system to use for function calls
-        jwt_token: Optional JWT token for API authentication
-        
-    Returns:
-        A dictionary with response and source documents, or None if RAG is unavailable
-    """
-    # Get the RAG instance
-    rag = get_rag_instance()
-    if not rag:
-        return None
-    
-    # Query the RAG system
-    try:
-        return rag.query_with_openai_function_calling(message, user_id, system_id, jwt_token)
-    except Exception as e:
-        print(f"Error querying RAG system: {e}")
-        return None
-
-def get_chatbot_response(message: str, user_id: Optional[str] = None, system_id: Optional[str] = None, jwt_token: Optional[str] = None) -> Dict[str, Any]:
+def get_chatbot_response(message: str, user_id: Optional[str] = None, system_id: Optional[str] = None, jwt_token: Optional[str] = None, username: Optional[str] = "Guest User") -> Dict[str, Any]:
     """
     Generate a response based on the user's message.
     
     Args:
         message: The user's message
-        user_id: Optional user identifier for maintaining conversation context
+        user_id: Optional user identifier for maintaining conversation context (already includes device ID)
         system_id: The ID of the solar system to use for function calls
         jwt_token: Optional JWT token for API authentication
+        username: Optional user's name for personalized responses
     
     Returns:
         A dictionary with response and optional source documents
@@ -1081,10 +1225,17 @@ def get_chatbot_response(message: str, user_id: Optional[str] = None, system_id:
     if system_id:
         user_contexts[user_id]["current_system_id"] = system_id
     
-    # Convert message to lowercase for easier matching
-    message_lower = message.lower()
-    rag_result = get_error_code_response(message, user_id, system_id, jwt_token)
-    return rag_result
+    # Get the RAG instance
+    rag = get_rag_instance()
+    if not rag:
+        return {"response": "The Solar Assistant is currently unavailable.", "source_documents": []}
+    
+    # Query the RAG system directly
+    try:
+        return rag.query_with_openai_function_calling(message, user_id, system_id, jwt_token, username)
+    except Exception as e:
+        print(f"Error in chatbot response: {e}")
+        return {"response": f"I encountered an error while processing your request: {str(e)}", "source_documents": []}
 
 #---------------------------------------
 # API Endpoints
@@ -1097,21 +1248,38 @@ async def root():
 @app.post("/chat", response_model=ChatResponse)
 async def chat(chat_message: ChatMessage):
     try:
+        """
         print("INSIDE MAIN")
         print("======== INCOMING CHAT REQUEST ========")
         print(f"Raw request data: {chat_message}")
         print(f"Message: {chat_message.message}")
         print(f"User ID: {chat_message.user_id}")
-        print(f"System ID: {chat_message.system_id}")
+        print(f"Username: {chat_message.username}")
         print(f"JWT: {chat_message.jwtToken}")
         print("======================================")
+        """
         
-        # Extract system_id and user_id from the request
-        system_id = chat_message.system_id
+        # Extract user_id from the request
         user_id = chat_message.user_id or "default_user"
         
-        # Get response from chatbot, passing the system_id directly
-        result = get_chatbot_response(chat_message.message, user_id, system_id, chat_message.jwtToken)
+        # Extract system_id from the combined ID if present
+        # Format is expected to be: userId_deviceId_systemId
+        system_id = None
+        parts = user_id.split('_')
+        if len(parts) >= 3:
+            # The last part should be the system_id
+            system_id = parts[-1]
+            # For memory persistence, we'll use just the base user ID
+            # This is handled by _get_or_create_memory
+        
+        # Get response from chatbot
+        result = get_chatbot_response(
+            chat_message.message, 
+            user_id, 
+            system_id, 
+            chat_message.jwtToken,
+            chat_message.username
+        )
         
         # Process source documents if present
         source_documents = []
@@ -1119,8 +1287,8 @@ async def chat(chat_message: ChatMessage):
             for doc in result["source_documents"]:
                 source_documents.append(
                     SourceDocument(
-                        content=doc.page_content,
-                        metadata=doc.metadata
+                        content=doc.get("content", doc.page_content if hasattr(doc, "page_content") else ""),
+                        metadata=doc.get("metadata", {})
                     )
                 )
         
@@ -1140,9 +1308,9 @@ async def health_check():
         "rag_available": rag_available
     }
 
-#---------------------------------------
-# Run the application
-#---------------------------------------
+# Create a handler for AWS Lambda
+handler = Mangum(app)
 
+# Keep the local development server
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)

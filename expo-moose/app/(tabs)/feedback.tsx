@@ -97,7 +97,6 @@ export default function FeedbackScreen() {
             onPress: () => {
               // Reset form
               setName("");
-              setEmail("");
               setMessage("");
               setFeedbackType('bug');
             },

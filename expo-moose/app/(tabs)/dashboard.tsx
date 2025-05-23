@@ -27,6 +27,7 @@ import {
 import * as api from "@/api/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getCurrentUser, getAccessibleSystems } from "@/utils/auth";
+import StatusIcon from "@/components/StatusIcon";
 
 interface EnhancedPvSystem {
   id: string;
@@ -719,20 +720,9 @@ export default function DashboardScreen() {
                           style={styles.warningIcon}
                         />
                       )}
-                      <Chip
-                        style={[
-                          styles.statusChip,
-                          {
-                            backgroundColor: getStatusColor(item.status) + "22",
-                          },
-                        ]}
-                        textStyle={{
-                          color: getStatusColor(item.status),
-                          fontWeight: "600",
-                        }}
-                      >
-                        {item.status.toUpperCase()}
-                      </Chip>
+                      <StatusIcon
+                        systemId={item.id}
+                      />
                     </View>
                   </View>
                 </View>
@@ -991,7 +981,18 @@ export default function DashboardScreen() {
                 style={{ color: colors.primary, fontWeight: "400" }}
               >
                 {" "}
-                (Restricted Access v1.04)
+                (Temp Access v2.0.0)
+              </Text>
+            )}
+            {currentUser &&
+            currentUser.role == "admin" &&
+            accessibleSystemIds.length > 0 && (
+              <Text
+                variant="titleSmall"
+                style={{ color: colors.primary, fontWeight: "400" }}
+              >
+                {" "}
+                (v2.0.0)
               </Text>
             )}
         </Text>
@@ -1218,17 +1219,19 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   statusChipContainer: {
-    flexShrink: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
     marginLeft: 8,
+  },
+  statusChip: {
+    height: 30,
+    borderRadius: 16,
   },
   systemName: {
     fontWeight: "600",
     flex: 1,
     marginRight: 4,
-  },
-  statusChip: {
-    height: 30,
-    borderRadius: 16,
   },
   statsContainer: {
     flexDirection: "row",

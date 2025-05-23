@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Image,
   Platform,
+  Text,
+  Modal,
 } from "react-native";
 import MapView, { Marker, Callout, PROVIDER_GOOGLE } from "react-native-maps";
 import { getPvSystems, getPvSystemFlowData } from "@/api/api";
@@ -67,6 +69,25 @@ export default function PvSystemMap({
   const mapRef = useRef<MapView>(null);
   const router = useRouter();
   const primaryColor = useThemeColor({}, "tint");
+  const [selectedMarker, setSelectedMarker] = useState<PvSystemWithCoords | null>(null);
+  const [showAndroidModal, setShowAndroidModal] = useState(false);
+
+  // Platform-specific style helpers
+  const getCalloutStyle = () => {
+    if (Platform.OS === 'android') {
+      return {
+        backgroundColor: 'white', // Android needs a visible background
+        padding: 0,
+        margin: 0,
+        width: 320,
+        borderRadius: 8,
+        overflow: 'hidden' as 'hidden', // Type assertion to fix TypeScript error
+        // Add Android-specific shadow
+        elevation: 5,
+      };
+    }
+    return {};
+  };
 
   // Debug log for hasAccessToSystem prop
   useEffect(() => {
@@ -119,8 +140,13 @@ export default function PvSystemMap({
   };
 
   // Handle marker press - set selected marker
-  const handleMarkerPress = (pvSystemId: string) => {
-    setSelectedSystem(pvSystemId);
+  const handleMarkerPress = (system: PvSystemWithCoords) => {
+    if (Platform.OS === 'android') {
+      setSelectedMarker(system);
+      setShowAndroidModal(true);
+    } else {
+      setSelectedSystem(system.pvSystemId);
+    }
   };
 
   // Navigate to detail page
@@ -130,6 +156,16 @@ export default function PvSystemMap({
       params: { pvSystemId },
     });
   };
+
+  // Fix for Android callouts - different approach by platform
+  const getCalloutHandler = (pvSystemId: string) => {
+    if (Platform.OS === 'android') {
+      return undefined; // Android doesn't support onPress on Callout
+    } else {
+      return () => navigateToDetail(pvSystemId); // iOS supports it
+    }
+  };
+
   // get boolean status of system
   const getStatus = async(system: PvSystem) => {
     const data = await getPvSystemFlowData(system.pvSystemId);
@@ -464,109 +500,225 @@ export default function PvSystemMap({
                 longitude: system.coords.longitude,
               }}
               pinColor={getStatusColor(system.status)}
-              onPress={() => handleMarkerPress(system.pvSystemId)}
+              onPress={() => {
+                if (Platform.OS === 'android') {
+                  // For Android, use custom modal solution
+                  handleMarkerPress(system);
+                } else {
+                  // For iOS, use standard callout
+                  handleMarkerPress(system);
+                }
+              }}
               tracksViewChanges={false}
             >
-              <Callout
-                tooltip
-                onPress={() => navigateToDetail(system.pvSystemId)}
-              >
-                <ThemedView type="elevated" style={styles.calloutContainer}>
-                  <View style={styles.callout}>
-                    <View style={styles.calloutHeader}>
-                      <ThemedText type="heading" style={styles.calloutTitle}>
-                        {system.name}
-                      </ThemedText>
-                      <View
-                        style={[
-                          styles.statusDot,
-                          { backgroundColor: getStatusColor(system.status) },
-                        ]}
-                      />
-                    </View>
-
-                    <View style={styles.calloutImageContainer}>
-                      {system.pictureURL ? (
-                        <Image
-                          source={{ uri: system.pictureURL }}
-                          style={styles.calloutImage}
-                          resizeMode="cover"
+              {Platform.OS !== 'android' && (
+                <Callout
+                  tooltip
+                  onPress={getCalloutHandler(system.pvSystemId)}
+                >
+                  <ThemedView type="elevated" style={styles.calloutContainer}>
+                    <View style={styles.callout}>
+                      <View style={styles.calloutHeader}>
+                        <ThemedText type="heading" style={styles.calloutTitle}>
+                          {system.name}
+                        </ThemedText>
+                        <View
+                          style={[
+                            styles.statusDot,
+                            { backgroundColor: getStatusColor(system.status) },
+                          ]}
                         />
-                      ) : (
-                        <View style={styles.placeholderImage}>
-                          <ThemedText type="caption">No Image</ThemedText>
-                        </View>
-                      )}
-                    </View>
-
-                    <View style={styles.calloutContent}>
-                      <ThemedText type="caption" style={styles.calloutLocation}>
-                        {formatAddress({
-                          street: system.address.street || "",
-                          city: system.address.city || "",
-                          zipCode: system.address.zipCode || "",
-                          country: system.address.country || "",
-                          state: system.address.state || null,
-                        })}
-                      </ThemedText>
-
-                      <View style={styles.calloutStats}>
-                        <View style={styles.stat}>
-                          <ThemedText type="caption" style={styles.statLabel}>
-                            Status:
-                          </ThemedText>
-                          <ThemedText
-                            type="caption"
-                            style={[
-                              styles.statValue,
-                              { color: getStatusColor(system.status) },
-                            ]}
-                          >
-                            {system.status === "online"
-                              ? "Online"
-                              : system.status === "warning"
-                              ? "Warning"
-                              : "Offline"}
-                          </ThemedText>
-                        </View>
-
-                        <View style={styles.stat}>
-                          <ThemedText type="caption" style={styles.statLabel}>
-                            Power:
-                          </ThemedText>
-                          <ThemedText type="caption" style={styles.statValue}>
-                            {system.peakPower ? `${system.peakPower} W` : "N/A"}
-                          </ThemedText>
-                        </View>
-
-                        <View style={styles.stat}>
-                          <ThemedText type="caption" style={styles.statLabel}>
-                            Installed:
-                          </ThemedText>
-                          <ThemedText type="caption" style={styles.statValue}>
-                            {new Date(
-                              system.installationDate
-                            ).toLocaleDateString()}
-                          </ThemedText>
-                        </View>
                       </View>
 
-                      <TouchableOpacity
-                        style={styles.viewDetailsButton}
-                        onPress={() => navigateToDetail(system.pvSystemId)}
-                      >
-                        <ThemedText type="link" style={styles.viewDetailsText}>
-                          Tap to view details
+                      <View style={styles.calloutImageContainer}>
+                        {system.pictureURL ? (
+                          <Image
+                            source={{ uri: system.pictureURL }}
+                            style={styles.calloutImage}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={styles.placeholderImage}>
+                            <ThemedText type="caption">No Image</ThemedText>
+                          </View>
+                        )}
+                      </View>
+
+                      <View style={styles.calloutContent}>
+                        <ThemedText type="caption" style={styles.calloutLocation}>
+                          {formatAddress({
+                            street: system.address.street || "",
+                            city: system.address.city || "",
+                            zipCode: system.address.zipCode || "",
+                            country: system.address.country || "",
+                            state: system.address.state || null,
+                          })}
                         </ThemedText>
-                      </TouchableOpacity>
+
+                        <View style={styles.calloutStats}>
+                          <View style={styles.stat}>
+                            <ThemedText type="caption" style={styles.statLabel}>
+                              Status:
+                            </ThemedText>
+                            <ThemedText
+                              type="caption"
+                              style={[
+                                styles.statValue,
+                                { color: getStatusColor(system.status) },
+                              ]}
+                            >
+                              {system.status === "online"
+                                ? "Online"
+                                : system.status === "warning"
+                                ? "Warning"
+                                : "Offline"}
+                            </ThemedText>
+                          </View>
+
+                          <View style={styles.stat}>
+                            <ThemedText type="caption" style={styles.statLabel}>
+                              Power:
+                            </ThemedText>
+                            <ThemedText type="caption" style={styles.statValue}>
+                              {system.peakPower ? `${system.peakPower} W` : "N/A"}
+                            </ThemedText>
+                          </View>
+
+                          <View style={styles.stat}>
+                            <ThemedText type="caption" style={styles.statLabel}>
+                              Installed:
+                            </ThemedText>
+                            <ThemedText type="caption" style={styles.statValue}>
+                              {new Date(
+                                system.installationDate
+                              ).toLocaleDateString()}
+                            </ThemedText>
+                          </View>
+                        </View>
+
+                        <TouchableOpacity
+                          style={styles.viewDetailsButton}
+                          onPress={() => navigateToDetail(system.pvSystemId)}
+                        >
+                          <ThemedText type="link" style={styles.viewDetailsText}>
+                            Tap to view details
+                          </ThemedText>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                  </View>
-                </ThemedView>
-              </Callout>
+                  </ThemedView>
+                </Callout>
+              )}
             </Marker>
           );
         })}
       </MapView>
+
+      {/* Android custom modal for marker details */}
+      {Platform.OS === 'android' && (
+        <Modal
+          visible={showAndroidModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowAndroidModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              {selectedMarker && (
+                <>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>{selectedMarker.name}</Text>
+                    <View
+                      style={[
+                        styles.statusDot,
+                        { backgroundColor: getStatusColor(selectedMarker.status) },
+                      ]}
+                    />
+                    <TouchableOpacity 
+                      style={styles.closeButton}
+                      onPress={() => setShowAndroidModal(false)}
+                    >
+                      <Text style={styles.closeButtonText}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.modalImageContainer}>
+                    {selectedMarker.pictureURL ? (
+                      <Image
+                        source={{ uri: selectedMarker.pictureURL }}
+                        style={styles.modalImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.modalPlaceholderImage}>
+                        <Text style={styles.modalText}>No Image</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.modalContent}>
+                    <Text style={styles.modalAddressText}>
+                      {formatAddress({
+                        street: selectedMarker.address.street || "",
+                        city: selectedMarker.address.city || "",
+                        zipCode: selectedMarker.address.zipCode || "",
+                        country: selectedMarker.address.country || "",
+                        state: selectedMarker.address.state || null,
+                      })}
+                    </Text>
+
+                    <View style={styles.modalStats}>
+                      <View style={styles.modalStat}>
+                        <Text style={styles.modalStatLabel}>Status:</Text>
+                        <Text 
+                          style={[
+                            styles.modalStatValue, 
+                            {color: getStatusColor(selectedMarker.status)}
+                          ]}
+                        >
+                          {selectedMarker.status === "online" 
+                            ? "Online" 
+                            : selectedMarker.status === "warning" 
+                              ? "Warning" 
+                              : "Offline"}
+                        </Text>
+                      </View>
+
+                      <View style={styles.modalStat}>
+                        <Text style={styles.modalStatLabel}>Power:</Text>
+                        <Text style={styles.modalStatValue}>
+                          {selectedMarker.peakPower 
+                            ? `${selectedMarker.peakPower} W` 
+                            : "N/A"}
+                        </Text>
+                      </View>
+
+                      <View style={styles.modalStat}>
+                        <Text style={styles.modalStatLabel}>Installed:</Text>
+                        <Text style={styles.modalStatValue}>
+                          {new Date(selectedMarker.installationDate).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={styles.modalDetailsButton}
+                      onPress={() => {
+                        setShowAndroidModal(false);
+                        navigateToDetail(selectedMarker.pvSystemId);
+                      }}
+                    >
+                      <Text style={styles.modalDetailsButtonText}>
+                        View Details
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
     </ThemedView>
   );
 }
@@ -600,6 +752,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
+    zIndex: 999,
+    ...Platform.select({
+      android: {
+        width: 320, // Slightly wider on Android
+      }
+    })
   },
   callout: {
     width: "100%",
@@ -669,5 +827,162 @@ const styles = StyleSheet.create({
   },
   viewDetailsText: {
     color: "#FF9800",
+  },
+  androidCalloutContainer: {
+    width: 320, // Slightly wider on Android
+    backgroundColor: 'white',
+    borderRadius: 8,
+    padding: 0,
+    // Android needs explicit sizing and styling
+    minHeight: 350, // Ensure enough height to show content
+    elevation: 5,
+  },
+  androidCallout: {
+    width: '100%',
+    backgroundColor: 'white',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  androidCalloutHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0,0,0,0.1)",
+    backgroundColor: 'white',
+  },
+  androidTitle: {
+    fontSize: 18,
+    flex: 1,
+    color: '#000000',
+    fontWeight: 'bold',
+  },
+  androidText: {
+    color: '#000000', // Ensure text is black for visibility
+    opacity: 1,       // Make sure opacity is full
+    fontSize: 14,     // Slightly larger font size
+    fontWeight: '400', // Medium font weight
+    marginVertical: 2,
+  },
+  androidImageContainer: {
+    height: 120,
+    width: "100%",
+  },
+  androidCalloutImage: {
+    width: "100%",
+    height: "100%",
+  },
+  androidPlaceholderImage: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#e0e0e0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  androidCalloutContent: {
+    padding: 10,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: '90%',
+    maxWidth: 350,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    overflow: 'hidden',
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    color: '#000',
+  },
+  closeButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 10,
+  },
+  closeButtonText: {
+    fontSize: 22,
+    color: '#000',
+    lineHeight: 22,
+  },
+  modalImageContainer: {
+    height: 180,
+    width: '100%',
+  },
+  modalImage: {
+    width: '100%',
+    height: '100%',
+  },
+  modalPlaceholderImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalText: {
+    color: '#000',
+    fontSize: 14,
+  },
+  modalAddressText: {
+    color: '#000',
+    fontSize: 14,
+    marginBottom: 10,
+    paddingHorizontal: 15,
+    paddingTop: 15,
+  },
+  modalStats: {
+    marginVertical: 10,
+    paddingHorizontal: 15,
+  },
+  modalStat: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  modalStatLabel: {
+    fontWeight: 'bold',
+    width: 80,
+    color: '#000',
+    fontSize: 14,
+  },
+  modalStatValue: {
+    flex: 1,
+    color: '#000',
+    fontSize: 14,
+  },
+  modalDetailsButton: {
+    margin: 15,
+    marginTop: 5,
+    backgroundColor: '#0077cc',
+    padding: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  modalDetailsButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });

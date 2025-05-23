@@ -10,7 +10,7 @@ export default {
     // --- Basic App Info (Using values from app.config.js primarily) ---
     name: "Moose Solar",
     slug: "moose-solar",
-    version: "1.0.4", // Consider using eas.json appVersionSource: remote
+    version: "2.0.0", // Consider using eas.json appVersionSource: remote
     orientation: "portrait",
     scheme: "moose-solar", // Added from app.json
     updates: {
@@ -46,7 +46,7 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.moose.solar",
-      buildNumber: "1.0.4", // Consider using eas build --auto-increment or remote app version source
+      buildNumber: "2.0.0", // Consider using eas build --auto-increment or remote app version source
       // Merged infoPlist entries from both files
       infoPlist: {
         // From app.json
@@ -87,6 +87,12 @@ export default {
       // Correct way to handle keyboard behavior (from app.config.js)
       softwareKeyboardLayoutMode: "pan",
       // Note: googleMaps.apiKey and incorrect windowSoftInputMode removed
+      buildNumber: "2.0.0",
+      config: {
+        googleMaps: {
+          apiKey: process.env.GOOGLE_MAPS_API_KEY,
+        },
+      },
     },
 
     // --- Web Specific ---
@@ -145,6 +151,7 @@ export default {
       apiBaseUrl: process.env.API_BASE_URL,
       supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL2,
       supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY2,
+      awsApiUrl: process.env.AWS_API_URL,
       // EAS Project ID (using the one from app.config.js)
     /*
       eas: {

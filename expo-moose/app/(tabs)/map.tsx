@@ -130,14 +130,25 @@ export default function MapScreen() {
           {currentUser &&
             currentUser.role !== "admin" &&
             accessibleSystemIds.length > 0 && (
-            <Text
-              variant="titleSmall"
-              style={{ color: colors.primary, fontWeight: "400" }}
-            >
-              {" "}
-              (Restricted Access v1.04)
-            </Text>
-          )}
+              <Text
+                variant="titleSmall"
+                style={{ color: colors.primary, fontWeight: "400" }}
+              >
+                {" "}
+                (Temp Access v2.0.0)
+              </Text>
+            )}
+            {currentUser &&
+            currentUser.role == "admin" &&
+            accessibleSystemIds.length > 0 && (
+              <Text
+                variant="titleSmall"
+                style={{ color: colors.primary, fontWeight: "400" }}
+              >
+                {" "}
+                (v2.0.0)
+              </Text>
+            )}
         </Text>
         <IconButton
           icon="refresh"

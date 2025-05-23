@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+python/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Development
+.git
+.github
+.gitignore
+.vscode
+.idea
+*.md
+!README.md
+deployment/
+*.zip
+*.tar.gz
+
+# Docker
+.dockerignore
+Dockerfile*
+
+# AWS
+aws-lambda-rie
+.aws
+_pycache_
+*.backup
+layer.zip
+deployment.zip
+function.zip
+
+# Testing
+test/
+tests/
+pytest_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Deployment files
+*.sh
+*.bat
+*.ps1
+
+# Generated files
+*.log
+*.swp
+.DS_Store 

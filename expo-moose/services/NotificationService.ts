@@ -155,7 +155,7 @@ export async function scheduleMorningNotification() {
 }
 
 // Schedule the evening notification (6 PM)
-export async function scheduleEveningNotification(energyProduced?: string) {
+export async function scheduleEveningNotification(energyProduced?: string | null) {
   // Cancel any existing evening notifications first
   await cancelScheduledNotification('evening-notification');
   

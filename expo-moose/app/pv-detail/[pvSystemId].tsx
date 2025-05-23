@@ -29,6 +29,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LocalIonicon } from "@/components/ui/LocalIonicon";
 import { LineChart, BarChart } from "react-native-chart-kit";
 import WeatherWidget from '../../components/WeatherWidget';
+import StatusIcon from "@/components/StatusIcon";
+
 const findChannelValue = (
   channels:
     | api.FlowDataChannel[]
@@ -73,6 +75,31 @@ const formatApiDateString = (date: Date): string => {
 // Update the getIsoDateString function to format dates correctly for API
 const getIsoDateString = (date: Date): string => {
   return formatApiDateString(date);
+};
+
+// Add a helper function for getting the first day of the week (Monday)
+const getFirstDayOfWeek = (d: Date): Date => {
+  const day = d.getDay();
+  // Adjust when day is 0 (Sunday)
+  const diff = d.getDate() - (day === 0 ? 6 : day - 1);
+  const firstDay = new Date(d.setDate(diff));
+  // Reset time to start of day
+  firstDay.setHours(0, 0, 0, 0);
+  return firstDay;
+};
+
+// Add a helper function for getting the first day of a month
+const getFirstDayOfMonth = (d: Date): Date => {
+  const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
+  firstDay.setHours(0, 0, 0, 0);
+  return firstDay;
+};
+
+// Add a helper function for getting the first day of a year
+const getFirstDayOfYear = (d: Date): Date => {
+  const firstDay = new Date(d.getFullYear(), 0, 1); // Jan 1st
+  firstDay.setHours(0, 0, 0, 0);
+  return firstDay;
 };
 
 export default function PvSystemDetailScreen() {
@@ -252,18 +279,23 @@ export default function PvSystemDetailScreen() {
       }
 
       const fromDate = new Date();
-      fromDate.setDate(fromDate.getDate() - 30); // Go back 30 days
+      fromDate.setDate(fromDate.getDate() - 30); // Go back 30 days for error messages
       const toDate = new Date();
 
-      // Create dates for different periods
-      const weekFromDate = new Date();
-      weekFromDate.setDate(weekFromDate.getDate() - 7);
-
-      const monthFromDate = new Date();
-      monthFromDate.setMonth(monthFromDate.getMonth() - 1);
-
-      const yearFromDate = new Date();
-      yearFromDate.setFullYear(yearFromDate.getFullYear() - 1);
+      // Create dates for different periods using calendar boundaries
+      const now = new Date();
+      
+      // Week: From Monday of this week to today
+      const weekFromDate = getFirstDayOfWeek(new Date());
+      const weekDuration = Math.floor((now.getTime() - weekFromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      
+      // Month: From the 1st of current month to today
+      const monthFromDate = getFirstDayOfMonth(new Date());
+      const monthDuration = Math.floor((now.getTime() - monthFromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      
+      // Year: From January 1st of current year to today
+      const yearFromDate = getFirstDayOfYear(new Date());
+      const yearDuration = Math.floor((now.getTime() - yearFromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
       const [
         details,
@@ -287,22 +319,22 @@ export default function PvSystemDetailScreen() {
           from: getShortDateString(new Date()),
           duration: 1,
         }),
-        // Weekly data
+        // Weekly data - from Monday of this week
         api.getPvSystemAggregatedData(pvSystemId, {
           from: getShortDateString(weekFromDate),
-          duration: 7,
+          duration: weekDuration,
           channel: "EnergyProductionTotal",
         }),
-        // Monthly data
+        // Monthly data - from 1st of this month
         api.getPvSystemAggregatedData(pvSystemId, {
           from: getShortDateString(monthFromDate),
-          duration: 30,
+          duration: monthDuration,
           channel: "EnergyProductionTotal",
         }),
-        // Yearly data
+        // Yearly data - from Jan 1st of this year
         api.getPvSystemAggregatedData(pvSystemId, {
           from: getShortDateString(yearFromDate),
-          duration: 365,
+          duration: yearDuration,
           channel: "EnergyProductionTotal",
         }),
         // Daily CO2 savings
@@ -311,22 +343,22 @@ export default function PvSystemDetailScreen() {
           duration: 1,
           channel: "SavingsCO2",
         }),
-        // Weekly CO2 savings
+        // Weekly CO2 savings - from Monday of this week
         api.getPvSystemAggregatedData(pvSystemId, {
           from: getShortDateString(weekFromDate),
-          duration: 7,
+          duration: weekDuration,
           channel: "SavingsCO2",
         }),
-        // Monthly CO2 savings
+        // Monthly CO2 savings - from 1st of this month
         api.getPvSystemAggregatedData(pvSystemId, {
           from: getShortDateString(monthFromDate),
-          duration: 30,
+          duration: monthDuration,
           channel: "SavingsCO2",
         }),
-        // Yearly CO2 savings
+        // Yearly CO2 savings - from Jan 1st of this year
         api.getPvSystemAggregatedData(pvSystemId, {
           from: getShortDateString(yearFromDate),
-          duration: 365,
+          duration: yearDuration,
           channel: "SavingsCO2",
         }),
         api.getPvSystemAggregatedData(pvSystemId, {
@@ -482,6 +514,7 @@ export default function PvSystemDetailScreen() {
       const now = new Date();
       let fromDate = new Date();
       let toDate = new Date(now); // Use current time as 'to' for day view
+      let durationDays: number;
 
       console.log(`Fetching energy data for ${period} view`);
 
@@ -526,20 +559,19 @@ export default function PvSystemDetailScreen() {
           setEnergyHistData(null);
         }
       } else {
-        // Keep existing logic for week, month, year using getPvSystemAggregatedData
-        let durationDays: number;
-
-        // Determine time range based on period
+        // Calendar-based period calculations
         if (period === "week") {
-          fromDate.setDate(now.getDate() - 7);
-          durationDays = 7;
+          // Find Monday of current week
+          fromDate = getFirstDayOfWeek(new Date());
+          durationDays = Math.floor((now.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
         } else if (period === "month") {
-          fromDate.setMonth(now.getMonth() - 1);
-          durationDays = 30;
+          // Find 1st of current month
+          fromDate = getFirstDayOfMonth(new Date());
+          durationDays = Math.floor((now.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
         } else {
-          // year
-          fromDate.setFullYear(now.getFullYear() - 1);
-          durationDays = 365;
+          // Find January 1st of current year
+          fromDate = getFirstDayOfYear(new Date());
+          durationDays = Math.floor((now.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
         }
 
         // Format date string for API
@@ -1540,6 +1572,24 @@ return (
       {/* Add the Navigation Bar */}
       <TopNavigationBar activeTab={activeTab as 'overview' | 'performance' | 'system'} setActiveTab={setActiveTab as React.Dispatch<React.SetStateAction<'overview' | 'performance' | 'system'>>}   />
       
+      {/* Status indicator moved outside ScrollView to prevent re-rendering */}
+      {pvSystemId && (
+        <View style={{
+          flexDirection: 'row',
+          justifyContent: 'flex-start',
+          alignItems: 'center',
+          backgroundColor: 'transparent', 
+          paddingHorizontal: 16, 
+          paddingVertical: 4,
+          marginBottom: 0
+        }}>
+          <StatusIcon 
+            systemId={pvSystemId as string} 
+            key={`status-${pvSystemId}`} 
+          />
+        </View>
+      )}
+      
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -1558,24 +1608,8 @@ return (
         {activeTab === 'overview' && (
           <>
             {/* System Dashboard Section */}
-            {/* Header with status indicator - keep this visible on all tabs */}
         <Animated.View entering={FadeInDown.springify()}>
-          <View style={styles.header}>
-            <View style={[styles.statusContainer, {marginTop: 15}]}>
-              <View
-                style={[
-                  styles.statusIndicator,
-                  { backgroundColor: systemStatusColor },
-                  
-                ]}
-              />
-              <ThemedText style={styles.statusText}>
-                {systemIsOnline ? "Online" : "Offline"}
-              </ThemedText>
-            </View>
-          </View>
-
-          {/* Image - keep this visible on all tabs */}
+          {/* Image section */}
           <View style={styles.imageContainer}>
             {pvSystemDetails.pictureURL ? (
               <Image
@@ -1961,7 +1995,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 16,
     flexDirection: "row",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   statusContainer: {
     flexDirection: "row",
@@ -2465,5 +2500,11 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.7)',
     marginTop: 4,
 
-  }
+  },
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
 });
