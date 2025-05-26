@@ -295,4 +295,78 @@ export async function cancelAllNotifications() {
 // Get all scheduled notifications
 export async function getAllScheduledNotifications() {
   return await Notifications.getAllScheduledNotificationsAsync();
+}
+
+// Status notifications
+export async function sendStatusNotification(status: 'online' | 'warning' | 'error' | 'offline') {
+  // Check if notifications are enabled
+  try {
+    console.log('Sending status notification');
+    const notificationsEnabled = await AsyncStorage.getItem('notifications_enabled_key');
+    if (notificationsEnabled !== 'true') {
+      console.log('Status notifications are disabled, not sending notification');
+      return;
+    }
+  } catch (error) {
+    console.error('Error checking notification settings:', error);
+  }
+
+  let title, body, priority;
+  
+  switch (status) {
+    case 'offline':
+      title = 'System Offline';
+      body = 'One or more of your solar systems is currently offline. Please check the app for details.';
+      priority = Notifications.AndroidImportance.HIGH;
+      break;
+    case 'error':
+      title = 'System Error';
+      body = 'One or more of your solar systems is reporting an error. Please check the app for details.';
+      priority = Notifications.AndroidImportance.HIGH;
+      break;
+    case 'warning':
+      title = 'System Warning';
+      body = 'One or more of your solar systems is showing a warning. Please check the app for details.';
+      priority = Notifications.AndroidImportance.DEFAULT;
+      break;
+    case 'online':
+      title = 'Systems Online';
+      body = 'All your solar systems are now operating normally.';
+      priority = Notifications.AndroidImportance.LOW;
+      break;
+  }
+
+  // Store the last status to avoid sending repeated notifications
+  const lastStatus = await AsyncStorage.getItem('last_status_notification');
+  
+  // Only send a notification if status has changed
+  if (lastStatus !== status) {
+    await AsyncStorage.setItem('last_status_notification', status);
+    
+    // Create a status-specific channel for Android
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('system-status', {
+        name: 'System Status Alerts',
+        importance: priority,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: status === 'online' ? '#4CAF50' : status === 'warning' ? '#FF9800' : '#F44336',
+      });
+    }
+    
+    return await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        data: { 
+          type: 'status-notification',
+          status 
+        },
+      },
+      trigger: null, // null means send immediately
+      identifier: `status-notification-${Date.now()}`,
+    });
+  } else {
+    console.log(`Status ${status} already notified, skipping notification`);
+    return null;
+  }
 } 

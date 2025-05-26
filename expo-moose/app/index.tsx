@@ -17,6 +17,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeIn, SlideInUp } from "react-native-reanimated";
 import { useSession } from "@/utils/sessionContext";
 import { Image } from "expo-image";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { registerForPushNotificationsAsync, scheduleAllDailyNotifications } from "../services/NotificationService";
 
 export default function LoginPage() {
   // Theme and device information
@@ -74,7 +76,45 @@ export default function LoginPage() {
           [{ text: "OK" }]
         );
       } else {
-        router.replace("/(tabs)/dashboard");
+        // Check if notifications are enabled
+        const notificationsEnabled = await AsyncStorage.getItem('notifications_enabled_key');
+        
+        if (notificationsEnabled !== 'true') {
+          // Prompt user to enable notifications
+          Alert.alert(
+            "Enable Notifications",
+            "Would you like to receive status notifications for your solar systems?",
+            [
+              {
+                text: "Not Now",
+                style: "cancel",
+                onPress: () => {
+                  router.replace("/(tabs)/dashboard");
+                }
+              },
+              {
+                text: "Enable",
+                onPress: async () => {
+                  try {
+                    const token = await registerForPushNotificationsAsync();
+                    if (token) {
+                      await AsyncStorage.setItem('notifications_enabled_key', 'true');
+                      // Schedule notifications if needed
+                      await scheduleAllDailyNotifications();
+                      console.log("Notifications enabled successfully");
+                    }
+                    router.replace("/(tabs)/dashboard");
+                  } catch (error) {
+                    console.error("Error enabling notifications:", error);
+                    router.replace("/(tabs)/dashboard");
+                  }
+                }
+              }
+            ]
+          );
+        } else {
+          router.replace("/(tabs)/dashboard");
+        }
         console.log("Login successful");
       }
     } catch (error) {
