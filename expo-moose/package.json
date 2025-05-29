@@ -15,6 +15,8 @@
     "preset": "jest-expo"
   },
   "dependencies": {
+    "@aws-amplify/auth": "^6.13.0",
+    "@aws-amplify/react-native": "^1.1.10",
     "@aws-sdk/client-s3": "^3.782.0",
     "@aws-sdk/s3-request-presigner": "^3.782.0",
     "@expo/ngrok": "^4.1.0",
@@ -25,6 +27,7 @@
     "@react-navigation/bottom-tabs": "^7.2.0",
     "@react-navigation/native": "^7.0.14",
     "@supabase/supabase-js": "^2.49.4",
+    "aws-amplify": "^6.15.0",
     "axios": "^1.8.4",
     "dotenv": "^16.4.7",
     "expo": "~52.0.46",
@@ -58,6 +61,7 @@
     "react-native-chart-kit": "^6.12.0",
     "react-native-geocoding": "^0.5.0",
     "react-native-gesture-handler": "~2.20.2",
+    "react-native-get-random-values": "^1.11.0",
     "react-native-keyboard-aware-scroll-view": "^0.9.5",
     "react-native-maps": "1.18.0",
     "react-native-markdown-display": "^7.0.2",
@@ -71,6 +75,7 @@
     "react-native-url-polyfill": "^2.0.0",
     "react-native-web": "~0.19.13",
     "react-native-webview": "13.12.5",
+    "text-encoding-polyfill": "^0.6.7",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

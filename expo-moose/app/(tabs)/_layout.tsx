@@ -26,19 +26,7 @@ import { useSession } from "@/utils/sessionContext";
 export default function TabLayout() {
   const { isDarkMode, colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const colorScheme = useColorScheme();
-  const primaryColor = useThemeColor({}, "tint");
   const backgroundColor = useThemeColor({}, "background");
-  const borderColor = useThemeColor({}, "border");
-  const { signOut } = useSession();
-
-  const goToSettings = () => {
-    router.push("/settings");
-  };
-
-  const handleLogout = async () => {
-    await signOut();
-  };
 
   return (
     <Tabs
@@ -109,27 +97,6 @@ export default function TabLayout() {
         tabBarItemStyle: {
           paddingTop: Platform.OS === "ios" ? 10 : 0,
         },
-        headerStyle: {
-          backgroundColor: isDarkMode ? colors.card : "#fff",
-        },
-        headerShadowVisible: false,
-        headerTintColor: colors.text,
-        headerRight: () => (
-          <View style={styles.headerRightContainer}>
-            <TouchableOpacity
-              onPress={goToSettings}
-              style={styles.headerButton}
-            >
-              <Ionicons name="settings-outline" size={24} color={colors.text} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleLogout}
-              style={styles.headerButton}
-            >
-              <Ionicons name="log-out-outline" size={24} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-        ),
       }}
     >
       <Tabs.Screen

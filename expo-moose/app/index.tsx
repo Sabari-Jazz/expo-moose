@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   View,
@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { Text, TextInput, Button, Surface } from "react-native-paper";
 import { StatusBar } from "expo-status-bar";
-import { router } from "expo-router";
+import { router, Redirect } from "expo-router";
 import { useTheme } from "@/hooks/useTheme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeIn, SlideInUp } from "react-native-reanimated";
@@ -26,7 +26,7 @@ export default function LoginPage() {
   const insets = useSafeAreaInsets();
 
   // Get session context
-  const { signIn, isLoading: sessionLoading } = useSession();
+  const { session, signIn, isLoading: sessionLoading } = useSession();
 
   // Form state
   const [username, setUsername] = useState("");
@@ -34,6 +34,11 @@ export default function LoginPage() {
   const [secureTextEntry, setSecureTextEntry] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState({ username: "", password: "" });
+
+  // If user is authenticated, redirect using Expo Router's Redirect component
+  if (session && !sessionLoading) {
+    return <Redirect href="/(tabs)/dashboard" />;
+  }
 
   // Validate form inputs
   const validateForm = () => {
@@ -117,11 +122,27 @@ export default function LoginPage() {
         }
         console.log("Login successful");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login error:", error);
+      
+      // Handle specific Cognito error messages
+      let errorMessage = "An error occurred during login. Please try again.";
+      
+      if (error.code === 'UserNotFoundException') {
+        errorMessage = "User does not exist. Please check your username.";
+      } else if (error.code === 'NotAuthorizedException') {
+        errorMessage = "Incorrect username or password. Please try again.";
+      } else if (error.code === 'UserNotConfirmedException') {
+        errorMessage = "Your account is not confirmed. Please contact an administrator.";
+      } else if (error.code === 'PasswordResetRequiredException') {
+        errorMessage = "You need to reset your password. Please contact an administrator.";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       Alert.alert(
         "Login Error",
-        "An error occurred during login. Please try again.",
+        errorMessage,
         [{ text: "OK" }]
       );
     } finally {

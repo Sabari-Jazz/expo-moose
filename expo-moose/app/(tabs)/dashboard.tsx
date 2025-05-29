@@ -29,6 +29,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getCurrentUser, getAccessibleSystems } from "@/utils/auth";
 import StatusIcon from "@/components/StatusIcon";
 import SummaryStatusIcon from "@/components/SummaryStatusIcon";
+import UserMenuDrawer from "@/components/UserMenuDrawer";
 
 interface EnhancedPvSystem {
   id: string;
@@ -78,6 +79,7 @@ export default function DashboardScreen() {
     name?: string;
   } | null>(null);
   const [accessibleSystemIds, setAccessibleSystemIds] = useState<string[]>([]);
+  const [userMenuVisible, setUserMenuVisible] = useState(false);
 
   // Helper function to format date for API calls
   const getShortDateString = (date: Date): string => {
@@ -90,6 +92,7 @@ export default function DashboardScreen() {
       try {
         const user = await getCurrentUser();
         setCurrentUser(user);
+        console.log('Current user:', user);
 
         if (user) {
           const systemIds = getAccessibleSystems(user.id);
@@ -1013,6 +1016,14 @@ export default function DashboardScreen() {
             onPress={onRefresh}
             disabled={refreshing}
           />
+          {/* User Menu Button */}
+          <IconButton
+            icon="menu"
+            iconColor={colors.primary}
+            size={24}
+            onPress={() => setUserMenuVisible(true)}
+            style={{ marginRight: -8 }}
+          />
         </View>
       </View>
 
@@ -1129,6 +1140,13 @@ export default function DashboardScreen() {
           ListFooterComponent={renderFooter}
         />
       )}
+
+      {/* User Menu Drawer */}
+      <UserMenuDrawer
+        isVisible={userMenuVisible}
+        onClose={() => setUserMenuVisible(false)}
+        currentUser={currentUser}
+      />
     </SafeAreaView>
   );
 }

@@ -1,8 +1,15 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
-import { AUTH_TOKEN_KEY, AUTH_USER_KEY, authenticate, User } from "./auth";
 import { deleteValueFor, getValueFor, save } from "./secureStore";
+import { 
+  User, 
+  signIn as cognitoSignIn, 
+  signOut as cognitoSignOut,
+  getCurrentUser,
+  AUTH_USER_KEY,
+  initAuth
+} from "./cognitoAuth";
 
 // System status type - include an "error" state distinct from "offline"
 export type SystemStatus = "online" | "warning" | "error" | "offline";
@@ -65,9 +72,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const loadSession = async () => {
       setIsLoading(true);
       try {
-        const userJson = await getValueFor(AUTH_USER_KEY);
-        if (userJson) {
-          const userData = JSON.parse(userJson);
+        // Initialize auth
+        await initAuth();
+        
+        // Get the current user
+        const userData = await getCurrentUser();
+        if (userData) {
           setSession(userData);
         }
       } catch (error) {
@@ -131,10 +141,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     };
   };
 
-  // Sign in function
+  // Sign in function - use the Cognito signIn
   const signIn = async (username: string, password: string) => {
     try {
-      const user = await authenticate(username, password);
+      const user = await cognitoSignIn(username, password);
       setSession(user);
       return user;
     } catch (error) {
@@ -143,13 +153,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Sign out function
+  // Sign out function - use the Cognito signOut
   const signOut = async () => {
     try {
-      // Remove auth token and user data
-      await deleteValueFor(AUTH_TOKEN_KEY);
-      await deleteValueFor(AUTH_USER_KEY);
+      await cognitoSignOut();
       setSession(null);
+      
+      // Also clear status data
+      setSystemStatuses({});
+      setOverallStatus("online");
+      setLastStatusUpdates({});
     } catch (error) {
       console.error("Sign out error:", error);
     }

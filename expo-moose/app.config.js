@@ -8,7 +8,7 @@ require('dotenv').config();
 export default {
   expo: {
     // --- Basic App Info (Using values from app.config.js primarily) ---
-    name: "Moose Solar",
+    name: "Moose Solar (Dev)",
     slug: "moose-solar",
     version: "2.0.0", // Consider using eas.json appVersionSource: remote
     orientation: "portrait",
@@ -45,7 +45,7 @@ export default {
     // --- iOS Specific ---
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.moose.solar",
+      bundleIdentifier: "com.moose.solar.dev",
       buildNumber: "2.0.0", // Consider using eas build --auto-increment or remote app version source
       // Merged infoPlist entries from both files
       infoPlist: {

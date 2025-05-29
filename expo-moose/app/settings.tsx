@@ -315,7 +315,7 @@ export default function SettingsScreen() {
 
           <List.Item
             title="App Version"
-            description="1.0.0"
+            description="2.0.0"
             left={(props) => (
               <List.Icon {...props} icon="information" color={colors.primary} />
             )}

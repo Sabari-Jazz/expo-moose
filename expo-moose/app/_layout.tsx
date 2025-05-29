@@ -1,3 +1,7 @@
+// Essential polyfills for AWS Amplify v6 - MUST be first
+import 'react-native-get-random-values';
+import 'react-native-url-polyfill/auto';
+
 import {
   DarkTheme,
   DefaultTheme,
@@ -29,6 +33,11 @@ import {
   getPrimaryPvSystemId,
 } from "@/services/NotificationService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+// Import AWS Amplify configuration
+import { configureAmplify } from "@/config/aws-config";
+
+// Initialize AWS Amplify
+configureAmplify();
 
 // Configure how notifications appear when the app is in the foreground
 Notifications.setNotificationHandler({
@@ -182,20 +191,19 @@ function AppLayoutNav() {
                 name="(tabs)"
                 options={{
                   headerShown: false,
-                  headerLargeTitle: false,
-                  headerLargeTitleShadowVisible: false,
                 }}
               />
               <Stack.Screen
                 name="pv-detail/[pvSystemId]"
                 options={{
+                  headerShown: false,
                   animation: "slide_from_right",
                 }}
               />
               <Stack.Screen
                 name="settings"
                 options={{
-                  title: "Settings",
+                  headerShown: false,
                   animation: "slide_from_right",
                 }}
               />
