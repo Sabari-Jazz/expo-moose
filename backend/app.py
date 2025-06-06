@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 import requests
 from datetime import datetime, timedelta
 from mangum import Mangum  # Add Mangum import
+import boto3
+from botocore.exceptions import ClientError
+import logging
 
 # Langchain imports
 
@@ -30,9 +33,32 @@ from pinecone import ServerlessSpec
 # Import OpenAI for direct function calling
 import openai
 from openai import OpenAI
+from decimal import Decimal
 
 # Load environment variables
 load_dotenv()
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('app')
+
+# AWS Configuration
+AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+DYNAMODB_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME', 'Moose-DDB')
+
+# Initialize DynamoDB client
+try:
+    dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
+    table = dynamodb.Table(DYNAMODB_TABLE_NAME)
+    print(f"Connected to DynamoDB table: {DYNAMODB_TABLE_NAME}")
+except Exception as e:
+    print(f"Failed to connect to DynamoDB: {str(e)}")
+    # Don't raise here to allow the API to start even if DynamoDB is not available
+    dynamodb = None
+    table = None
 
 # Create FastAPI app
 app = FastAPI(
@@ -96,6 +122,45 @@ class GetCO2SavingsParams(BaseModel):
     period: str = Field(description="The time period to get data for (today, week, month, year, custom)")
     start_date: Optional[str] = Field(default=None, description="Start date for custom period (format: YYYY-MM-DD)")
     duration: Optional[int] = Field(default=None, description="Duration in days for custom period")
+
+# User Management Models
+class UserRegistration(BaseModel):
+    """User registration data"""
+    user_id: str = Field(description="Unique user identifier")
+    name: str = Field(description="User's full name")
+    username: str = Field(description="Username")
+    email: str = Field(description="User's email address")
+    role: str = Field(default="user", description="User role (user, admin)")
+
+class DeviceRegistration(BaseModel):
+    """Device registration for push notifications"""
+    user_id: str = Field(description="User ID owning this device")
+    device_id: str = Field(description="Unique device identifier")
+    expo_push_token: str = Field(description="Expo push notification token")
+    platform: str = Field(description="Device platform (ios, android)")
+
+class SystemUserLink(BaseModel):
+    """Link a user to a solar system"""
+    user_id: str = Field(description="User ID")
+    system_id: str = Field(description="Solar system ID")
+
+class UserResponse(BaseModel):
+    """Response for user operations"""
+    success: bool
+    message: str
+    user_id: Optional[str] = None
+
+class DeviceResponse(BaseModel):
+    """Response for device operations"""
+    success: bool
+    message: str
+    device_id: Optional[str] = None
+
+class SystemLinkResponse(BaseModel):
+    """Response for system linking operations"""
+    success: bool
+    message: str
+    links_count: Optional[int] = None
 
 #---------------------------------------
 # Knowledge Base
@@ -1307,6 +1372,429 @@ async def health_check():
         "status": "healthy",
         "rag_available": rag_available
     }
+
+#---------------------------------------
+# DynamoDB Helper Functions
+#---------------------------------------
+
+def register_user_in_db(user_data: UserRegistration) -> UserResponse:
+    """Register a user in DynamoDB"""
+    if not table:
+        return UserResponse(success=False, message="Database not available")
+    
+    try:
+        # Create user profile record
+        user_item = {
+            'PK': f'User#{user_data.user_id}',
+            'SK': 'PROFILE',
+            'userId': user_data.user_id,
+            'name': user_data.name,
+            'username': user_data.username,
+            'email': user_data.email,
+            'role': user_data.role,
+            'createdAt': datetime.utcnow().isoformat(),
+            'updatedAt': datetime.utcnow().isoformat()
+        }
+        
+        # Use condition to prevent overwriting existing users
+        table.put_item(
+            Item=user_item,
+            ConditionExpression='attribute_not_exists(PK) AND attribute_not_exists(SK)'
+        )
+        
+        return UserResponse(
+            success=True,
+            message=f"User {user_data.name} registered successfully",
+            user_id=user_data.user_id
+        )
+        
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return UserResponse(
+                success=False,
+                message=f"User {user_data.user_id} already exists"
+            )
+        else:
+            return UserResponse(
+                success=False,
+                message=f"Database error: {str(e)}"
+            )
+    except Exception as e:
+        return UserResponse(
+            success=False,
+            message=f"Error registering user: {str(e)}"
+        )
+
+def register_device_in_db(device_data: DeviceRegistration) -> DeviceResponse:
+    """Register a device for push notifications in DynamoDB"""
+    if not table:
+        return DeviceResponse(success=False, message="Database not available")
+    
+    try:
+        # Create device record
+        device_item = {
+            'PK': f'User#{device_data.user_id}',
+            'SK': f'Device#{device_data.device_id}',
+            'userId': device_data.user_id,
+            'deviceId': device_data.device_id,
+            'expoPushToken': device_data.expo_push_token,
+            'platform': device_data.platform,
+            'createdAt': datetime.utcnow().isoformat(),
+            'updatedAt': datetime.utcnow().isoformat()
+        }
+        
+        # Upsert device (allow updates)
+        table.put_item(Item=device_item)
+        
+        return DeviceResponse(
+            success=True,
+            message=f"Device {device_data.device_id} registered successfully",
+            device_id=device_data.device_id
+        )
+        
+    except Exception as e:
+        return DeviceResponse(
+            success=False,
+            message=f"Error registering device: {str(e)}"
+        )
+
+def link_user_to_system_in_db(link_data: SystemUserLink) -> SystemLinkResponse:
+    """Link a user to a solar system in DynamoDB"""
+    if not table:
+        return SystemLinkResponse(success=False, message="Database not available")
+    
+    try:
+        # Create bidirectional links for efficient queries
+        user_to_system_item = {
+            'PK': f'User#{link_data.user_id}',
+            'SK': f'System#{link_data.system_id}',
+            'userId': link_data.user_id,
+            'systemId': link_data.system_id,
+            'linkType': 'USER_TO_SYSTEM',
+            'createdAt': datetime.utcnow().isoformat()
+        }
+        
+        system_to_user_item = {
+            'PK': f'System#{link_data.system_id}',
+            'SK': f'User#{link_data.user_id}',
+            'userId': link_data.user_id,
+            'systemId': link_data.system_id,
+            'linkType': 'SYSTEM_TO_USER',
+            'createdAt': datetime.utcnow().isoformat()
+        }
+        
+        # Use batch write for consistency
+        with table.batch_writer() as batch:
+            batch.put_item(Item=user_to_system_item)
+            batch.put_item(Item=system_to_user_item)
+        
+        return SystemLinkResponse(
+            success=True,
+            message=f"User {link_data.user_id} linked to system {link_data.system_id}",
+            links_count=2
+        )
+        
+    except Exception as e:
+        return SystemLinkResponse(
+            success=False,
+            message=f"Error linking user to system: {str(e)}"
+        )
+
+def get_user_systems(user_id: str) -> List[str]:
+    """Get list of system IDs accessible to a user"""
+    if not table:
+        return []
+    
+    try:
+        response = table.query(
+            KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
+            ExpressionAttributeValues={
+                ':pk': f'User#{user_id}',
+                ':sk': 'System#'
+            }
+        )
+        
+        return [item['systemId'] for item in response.get('Items', [])]
+        
+    except Exception as e:
+        print(f"Error getting user systems: {str(e)}")
+        return []
+
+def get_user_profile(user_id: str) -> Dict[str, Any]:
+    """Get user profile data from DynamoDB"""
+    if not table:
+        return {"error": "Database not available"}
+    
+    try:
+        response = table.get_item(
+            Key={
+                'PK': f'User#{user_id}',
+                'SK': 'PROFILE'
+            }
+        )
+        
+        if 'Item' in response:
+            item = response['Item']
+            return {
+                'email': item.get('email', ''),
+                'name': item.get('name', ''),
+                'role': item.get('role', 'user'),
+                'username': item.get('username', ''),
+                'userId': item.get('userId', user_id)
+            }
+        else:
+            return {"error": f"User profile not found for user_id: {user_id}"}
+            
+    except Exception as e:
+        print(f"Error getting user profile: {str(e)}")
+        return {"error": str(e)}
+
+
+# CONSOLIDATED DATA FUNCTIONS
+
+def get_consolidated_period_data(system_id: str, period_type: str, period_key: str = None) -> Dict[str, Any]:
+    """
+    Get consolidated period data (weekly, monthly, yearly) for a specific system
+    """
+    if not table:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        if period_key is None:
+            # Get the most recent entry for this period type
+            response = table.query(
+                IndexName='SystemDateIndex',
+                KeyConditionExpression=boto3.dynamodb.conditions.Key('PK').eq(f'System#{system_id}') & 
+                                     boto3.dynamodb.conditions.Key('SK').begins_with(f'DATA#{period_type.upper()}#'),
+                ScanIndexForward=False,  # Get most recent first
+                Limit=1
+            )
+        else:
+            # Get specific period
+            sk_value = f'DATA#{period_type.upper()}#{period_key}'
+            response = table.get_item(
+                Key={
+                    'PK': f'System#{system_id}',
+                    'SK': sk_value
+                }
+            )
+            
+            if 'Item' in response:
+                response = {'Items': [response['Item']]}
+            else:
+                response = {'Items': []}
+        
+        if not response['Items']:
+            return {"error": f"No {period_type} data found for system {system_id}"}
+        
+        item = response['Items'][0]
+        
+        # Convert Decimal types to float for JSON serialization
+        def convert_decimals(obj):
+            if isinstance(obj, dict):
+                return {k: convert_decimals(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_decimals(v) for v in obj]
+            elif isinstance(obj, Decimal):
+                return float(obj)
+            return obj
+        
+        result = convert_decimals(item)
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting consolidated {period_type} data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get {period_type} data")
+
+def get_all_system_profiles() -> List[Dict[str, Any]]:
+    """
+    Get all system profiles from the database
+    """
+    if not table:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        # Query for all system profiles
+        response = table.scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr('SK').eq('PROFILE')
+        )
+        
+        profiles = []
+        for item in response['Items']:
+            # Convert Decimal types to float for JSON serialization
+            def convert_decimals(obj):
+                if isinstance(obj, dict):
+                    return {k: convert_decimals(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_decimals(v) for v in obj]
+                elif isinstance(obj, Decimal):
+                    return float(obj)
+                return obj
+            
+            # Extract system ID from PK
+            system_id = item['PK'].replace('System#', '')
+            profile = convert_decimals(item)
+            profile['systemId'] = system_id
+            profiles.append(profile)
+        
+        return profiles
+        
+    except Exception as e:
+        logger.error(f"Error getting system profiles: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get system profiles")
+
+# CONSOLIDATED API ENDPOINTS
+@app.get("/api/systems/{system_id}/consolidated-daily")
+async def get_system_consolidated_daily_data(
+    system_id: str,
+    date: str = None
+):
+    """
+    API endpoint to get consolidated daily data (energy, power, CO2, earnings) from DynamoDB
+    """
+    logger.info(f"=== API ENDPOINT: /api/systems/{system_id}/consolidated-daily ===")
+    logger.info(f"Parameters - system_id: {system_id}, date: {date}")
+    
+    try:
+        if not date:
+            date = datetime.utcnow().strftime("%Y-%m-%d")
+            logger.info(f"No date provided, using current date: {date}")
+            
+        data = get_consolidated_period_data(system_id, "DAILY", date)
+        logger.info(f"API endpoint result: {data}")
+        
+        if "error" in data:
+            logger.error(f"Raising HTTPException 500: {data['error']}")
+            raise HTTPException(status_code=500, detail=data["error"])
+        return data
+    except HTTPException as he:
+        logger.error(f"HTTPException raised: {he.status_code} - {he.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected exception in API endpoint: {str(e)}")
+        import traceback
+        logger.error(f"Endpoint traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/systems/{system_id}/consolidated-weekly")
+async def get_system_consolidated_weekly_data(
+    system_id: str,
+    week_start: str = None
+):
+    """
+    API endpoint to get consolidated weekly data (energy, CO2, earnings) from DynamoDB
+    """
+    logger.info(f"=== API ENDPOINT: /api/systems/{system_id}/consolidated-weekly ===")
+    logger.info(f"Parameters - system_id: {system_id}, week_start: {week_start}")
+    
+    try:
+        data = get_consolidated_period_data(system_id, "WEEKLY", week_start)
+        logger.info(f"API endpoint result: {data}")
+        
+        if "error" in data:
+            logger.error(f"Raising HTTPException 500: {data['error']}")
+            raise HTTPException(status_code=500, detail=data["error"])
+        return data
+    except HTTPException as he:
+        logger.error(f"HTTPException raised: {he.status_code} - {he.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected exception in API endpoint: {str(e)}")
+        import traceback
+        logger.error(f"Endpoint traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/systems/{system_id}/consolidated-monthly")
+async def get_system_consolidated_monthly_data(
+    system_id: str,
+    month: str = None
+):
+    """
+    API endpoint to get consolidated monthly data (energy, CO2, earnings) from DynamoDB
+    """
+    try:
+        data = get_consolidated_period_data(system_id, "MONTHLY", month)
+        if "error" in data:
+            raise HTTPException(status_code=500, detail=data["error"])
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/systems/{system_id}/consolidated-yearly")
+async def get_system_consolidated_yearly_data(
+    system_id: str,
+    year: str = None
+):
+    """
+    API endpoint to get consolidated yearly data (energy, CO2, earnings) from DynamoDB
+    """
+    try:
+        data = get_consolidated_period_data(system_id, "YEARLY", year)
+        if "error" in data:
+            raise HTTPException(status_code=500, detail=data["error"])
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+#---------------------------------------
+# API Routes
+#---------------------------------------
+
+@app.get("/api/systems/profiles")
+async def get_systems_profiles():
+    """
+    Get all system profiles from database
+    """
+    try:
+        profiles = get_all_system_profiles()
+        return {"success": True, "data": profiles}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error in get_systems_profiles endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/api/user/{user_id}/profile")
+async def get_user_profile_endpoint(user_id: str):
+    """
+    Get user profile data from DynamoDB
+    """
+    logger.info(f"GET /api/user/{user_id}/profile")
+    
+    try:
+        profile_data = get_user_profile(user_id)
+        logger.info(f"Profile data result: {profile_data}")
+        
+        if "error" in profile_data:
+            raise HTTPException(status_code=404, detail=profile_data["error"])
+        
+        return profile_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_user_profile_endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/api/user/{user_id}/systems")
+async def get_user_systems_endpoint(user_id: str):
+    """
+    Get user's accessible systems from DynamoDB
+    """
+    logger.info(f"GET /api/user/{user_id}/systems")
+    
+    try:
+        systems_data = get_user_systems(user_id)
+        logger.info(f"Systems data result: Found {len(systems_data)} systems")
+        
+        return systems_data
+        
+    except Exception as e:
+        logger.error(f"Error in get_user_systems_endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Create a handler for AWS Lambda
 handler = Mangum(app)

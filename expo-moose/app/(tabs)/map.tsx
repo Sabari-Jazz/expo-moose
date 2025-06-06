@@ -6,7 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/hooks/useTheme";
 import { StatusBar } from "expo-status-bar";
 import Constants from "expo-constants";
-import { getCurrentUser, getAccessibleSystems } from "@/utils/auth";
+import { getCurrentUser, getAccessibleSystems } from "@/utils/cognitoAuth";
 
 export default function MapScreen() {
   const { isDarkMode, colors } = useTheme();
@@ -49,7 +49,7 @@ export default function MapScreen() {
         setCurrentUser(user);
 
         if (user) {
-          const systemIds = getAccessibleSystems(user.id);
+          const systemIds = await getAccessibleSystems(user.id);
           console.log("MAP: User ID:", user.id);
           console.log("MAP: User role:", user.role);
           console.log("MAP: User username:", user.username);

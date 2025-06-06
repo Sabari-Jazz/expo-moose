@@ -17,16 +17,13 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import * as api from "@/api/api";
-import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/hooks/useTheme";
 import Animated, { FadeInUp, FadeInDown } from "react-native-reanimated";
 import { Card, Divider, Chip, Button } from "react-native-paper";
-import { getCurrentUser, hasSystemAccess } from "@/utils/auth";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { LocalIonicon } from "@/components/ui/LocalIonicon";
+import { getCurrentUser, hasSystemAccess } from "@/utils/cognitoAuth";
 import { LineChart, BarChart } from "react-native-chart-kit";
 import WeatherWidget from '../../components/WeatherWidget';
 import StatusIcon from "@/components/StatusIcon";
@@ -108,29 +105,19 @@ export default function PvSystemDetailScreen() {
   const { isDarkMode, colors } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
 
   // State for all fetched data
   const [pvSystemDetails, setPvSystemDetails] =
     useState<api.PvSystemMetadata | null>(null);
-  const [flowData, setFlowData] = useState<api.FlowDataResponse | null>(null);
-  const [aggregatedDataToday, setAggregatedDataToday] =
-    useState<api.AggregatedDataResponse | null>(null);
-  const [aggregatedDataTotal, setAggregatedDataTotal] =
-    useState<api.AggregatedDataResponse | null>(null);
-  const [weatherData, setWeatherData] =
-    useState<api.CurrentWeatherResponse | null>(null);
-  const [messages, setMessages] = useState<api.SystemMessage[]>([]);
   const [devices, setDevices] = useState<api.DeviceMetadata[]>([]);
 
   // Combined loading and error states
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Add state for demo mode
-  const [demoMode, setDemoMode] = useState(false);
+  
 
   // State for historical chart data
   const [energyHistData, setEnergyHistData] =
@@ -146,28 +133,27 @@ export default function PvSystemDetailScreen() {
   >("today");
 
   // Add states for different period metrics
-  const [weeklyEnergyProduction, setWeeklyEnergyProduction] = useState<
-    number | null
-  >(null);
-  const [monthlyEnergyProduction, setMonthlyEnergyProduction] = useState<
-    number | null
-  >(null);
-  const [yearlyEnergyProduction, setYearlyEnergyProduction] = useState<
-    number | null
-  >(null);
+ 
 
-  // Add states for period-specific CO2 savings
-  const [dailyCo2Savings, setDailyCo2Savings] = useState<number | null>(null);
-  const [weeklyCo2Savings, setWeeklyCo2Savings] = useState<number | null>(null);
-  const [monthlyCo2Savings, setMonthlyCo2Savings] = useState<number | null>(
-    null
-  );
-  const [yearlyCo2Savings, setYearlyCo2Savings] = useState<number | null>(null);
 
   // Dashboard flatlist ref for programmatic scrolling
   const dashboardFlatListRef = useRef<FlatList>(null);
 
   const [dashboardSectionWidth, setDashboardSectionWidth] = useState<number>(Dimensions.get('window').width);
+
+  // Add states for current power and daily energy from consolidated data
+  const [consolidatedDailyData, setConsolidatedDailyData] = useState<any>(null);
+  const [consolidatedWeeklyData, setConsolidatedWeeklyData] = useState<any>(null);
+  const [consolidatedMonthlyData, setConsolidatedMonthlyData] = useState<any>(null);
+  const [consolidatedYearlyData, setConsolidatedYearlyData] = useState<any>(null);
+
+  // Update the existing computed values to use consolidated data when available
+  
+
+  
+
+
+  // ... existing code for other computed values ...
 
   // Check if user has access to this system
   useEffect(() => {
@@ -183,8 +169,7 @@ export default function PvSystemDetailScreen() {
           return;
         }
 
-        setIsAdmin(user.role === "admin");
-        const access = hasSystemAccess(user.id, pvSystemId as string);
+        const access = await hasSystemAccess(user.id, pvSystemId as string);
         setHasAccess(access);
 
         if (!access) {
@@ -201,293 +186,184 @@ export default function PvSystemDetailScreen() {
     checkAccess();
   }, [pvSystemId, router]);
 
-  // After the useEffect for fetching data, add another useEffect to check for demo mode status
-  // This should be the first useEffect after all the state declarations
-  useEffect(() => {
-    // Check if the dashboard has enabled demo mode and sync state
-    const checkDemoMode = async () => {
-      try {
-        const demoModeValue = await AsyncStorage.getItem("demo_mode");
-        setDemoMode(demoModeValue === "true");
-      } catch (error) {
-        console.error("Error retrieving demo mode state:", error);
-      }
-    };
-
-    checkDemoMode();
-  }, []);
-
-  // Add toggle demo mode function
-  const toggleDemoMode = async () => {
-    const newDemoMode = !demoMode;
-    setDemoMode(newDemoMode);
-
-    // Store demo mode setting so dashboard can retrieve it
-    try {
-      await AsyncStorage.setItem("demo_mode", newDemoMode.toString());
-      console.log(`Demo mode ${newDemoMode ? "enabled" : "disabled"}`);
-    } catch (error) {
-      console.error("Error saving demo mode state:", error);
-    }
-  };
-
-  // Add function to manually trigger demo error messages in demo mode
-  const addDemoErrorMessage = () => {
-    if (!demoMode) return;
-
-    // Create a random demo error message
-    const errorCodes = [
-      { code: 567, message: "Inverter communication timeout" },
-      { code: 101, message: "Grid voltage too high" },
-      { code: 302, message: "Temperature sensor fault" },
-      { code: 736, message: "Fan malfunction detected" },
-      { code: 415, message: "Battery connection error" },
-    ];
-
-    const randomError =
-      errorCodes[Math.floor(Math.random() * errorCodes.length)];
-
-    const newErrorMessage: api.SystemMessage = {
-      pvSystemId: pvSystemId as string,
-      deviceId: "demo-device-" + Math.floor(Math.random() * 1000),
-      stateType: "Error",
-      stateSeverity: "Error",
-      stateCode: randomError.code,
-      logDateTime: new Date().toISOString(),
-      text: `Demo Error: ${randomError.message}`,
-    };
-
-    // Add to the messages state
-    setMessages((prev) => [newErrorMessage, ...prev]);
-  };
-
+  
   // --- Date Helpers ---
   const getShortDateString = (date: Date): string => {
     return date.toISOString().split("T")[0]; // YYYY-MM-DD
   };
 
+  // NEW: Simplified data extraction for consolidated data
+  
+  // Helper function to format energy with automatic unit conversion
+  const formatEnergyValue = (energyWh: number): string => {
+    if (energyWh >= 1000) {
+      return `${(energyWh / 1000).toFixed(1)} kWh`;
+    } else {
+      return `${energyWh.toFixed(1)} Wh`;
+    }
+  };
+
+  // Helper function to format power with automatic unit conversion
+  const formatPowerValue = (powerW: number): string => {
+    if (powerW >= 1000) {
+      return `${(powerW / 1000).toFixed(1)} kW`;
+    } else {
+      return `${powerW.toFixed(1)} W`;
+    }
+  };
+
+  const extractEnergyFromConsolidatedData = (consolidatedData: any): string => {
+    console.log("PRINTING CONSOLIDATED DATA INSIDE ENERGY:", consolidatedData);
+    if (!consolidatedData || consolidatedData.energyProductionWh === undefined) {
+      return "0.0 Wh";
+    }
+    console.log("PRINTING REAL CONSOLIDATED ENERGY:", consolidatedData.energyProductionWh);
+    const energyWh = consolidatedData.energyProductionWh; // Already in Wh
+    return formatEnergyValue(energyWh);
+  };
+
+  const extractPowerFromConsolidatedData = (consolidatedData: any): string => {
+    console.log("PRINTING CONSOLIDATED DATA INSIDE POWER:", consolidatedData);
+    if (!consolidatedData || consolidatedData.currentPowerW === undefined) {
+      return "0.0 W";
+    }
+    console.log("PRINTING REAL CONSOLIDATED POWER:", consolidatedData.currentPowerW);
+    const powerW = consolidatedData.currentPowerW; // Already in W
+    return formatPowerValue(powerW);
+  };
+
+  const extractCO2FromConsolidatedData = (consolidatedData: any): number => {
+    console.log("PRINTING CONSOLIDATED DATA INSIDE CO2:", consolidatedData);
+    if (!consolidatedData || consolidatedData.co2Savings === undefined) {
+      return 0.0;
+    }
+    console.log("PRINTING REAL CONSOLIDATED CO2:", consolidatedData.co2Savings);
+    return consolidatedData.co2Savings; // Already in kg
+  };
+
+  const extractEarningsFromConsolidatedData = (consolidatedData: any): number => {
+    console.log("PRINTING CONSOLIDATED DATA INSIDE EARNINGS:", consolidatedData);
+    if (!consolidatedData || consolidatedData.earnings === undefined) {
+      return 0.0;
+    }
+    console.log("PRINTING REAL CONSOLIDATED EARNINGS:", consolidatedData.earnings);
+    return consolidatedData.earnings; // Already in dollars
+  };
+
+  // Updated fetchAllData function with consolidated approach
   const fetchAllData = async () => {
-    if (hasAccess === false) return;
+    if (!pvSystemId || hasAccess === false) return;
 
     setLoading(true);
     setError(null);
-    console.log(`Fetching all data for system: ${pvSystemId}`);
 
     try {
-      if (!pvSystemId || typeof pvSystemId !== "string") {
-        throw new Error("Invalid or missing PV System ID");
-      }
+      // Get actual current date for daily data
+      const actualToday = new Date();
+      
+      // Use Intl.DateTimeFormat to get EST date properly
+      const formatter = new Intl.DateTimeFormat('en-CA', { 
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: '2-digit', 
+        day: '2-digit'
+      });
+      const todayDateString = formatter.format(actualToday); // Returns "2025-06-05" format
 
+      /*
+      const todayDateString = actualToday.toISOString().split("T")[0]; // YYYY-MM-DD format
+      console.log("PRINTING UTC DATE:", todayDateString);
+      */
+      // Calculate other periods from the actual current date
+      const weekFromDate = getFirstDayOfWeek(actualToday);
+      const monthFromDate = getFirstDayOfMonth(actualToday);
+      const yearFromDate = getFirstDayOfYear(actualToday);
+
+
+      // For API calls that require date ranges
       const fromDate = new Date();
-      fromDate.setDate(fromDate.getDate() - 30); // Go back 30 days for error messages
-      const toDate = new Date();
+      fromDate.setDate(fromDate.getDate() - 1);
 
-      // Create dates for different periods using calendar boundaries
-      const now = new Date();
-      
-      // Week: From Monday of this week to today
-      const weekFromDate = getFirstDayOfWeek(new Date());
-      const weekDuration = Math.floor((now.getTime() - weekFromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      
-      // Month: From the 1st of current month to today
-      const monthFromDate = getFirstDayOfMonth(new Date());
-      const monthDuration = Math.floor((now.getTime() - monthFromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      
-      // Year: From January 1st of current year to today
-      const yearFromDate = getFirstDayOfYear(new Date());
-      const yearDuration = Math.floor((now.getTime() - yearFromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      console.log("Starting consolidated data fetch for all periods");
 
       const [
         details,
-        flow,
-        aggrToday,
-        aggrWeek,
-        aggrMonth,
-        aggrYear,
-        aggrCo2Today,
-        aggrCo2Week,
-        aggrCo2Month,
-        aggrCo2Year,
-        aggrTotal,
-        weather,
-        msgs,
+        consolidatedDaily,
+        consolidatedWeekly,
+        consolidatedMonthly,
+        consolidatedYearly,
         devs,
       ] = await Promise.allSettled([
         api.getPvSystemDetails(pvSystemId),
-        api.getPvSystemFlowData(pvSystemId),
-        api.getPvSystemAggregatedData(pvSystemId, {
-          from: getShortDateString(new Date()),
-          duration: 1,
-        }),
-        // Weekly data - from Monday of this week
-        api.getPvSystemAggregatedData(pvSystemId, {
-          from: getShortDateString(weekFromDate),
-          duration: weekDuration,
-          channel: "EnergyProductionTotal",
-        }),
-        // Monthly data - from 1st of this month
-        api.getPvSystemAggregatedData(pvSystemId, {
-          from: getShortDateString(monthFromDate),
-          duration: monthDuration,
-          channel: "EnergyProductionTotal",
-        }),
-        // Yearly data - from Jan 1st of this year
-        api.getPvSystemAggregatedData(pvSystemId, {
-          from: getShortDateString(yearFromDate),
-          duration: yearDuration,
-          channel: "EnergyProductionTotal",
-        }),
-        // Daily CO2 savings
-        api.getPvSystemAggregatedData(pvSystemId, {
-          from: getShortDateString(new Date()),
-          duration: 1,
-          channel: "SavingsCO2",
-        }),
-        // Weekly CO2 savings - from Monday of this week
-        api.getPvSystemAggregatedData(pvSystemId, {
-          from: getShortDateString(weekFromDate),
-          duration: weekDuration,
-          channel: "SavingsCO2",
-        }),
-        // Monthly CO2 savings - from 1st of this month
-        api.getPvSystemAggregatedData(pvSystemId, {
-          from: getShortDateString(monthFromDate),
-          duration: monthDuration,
-          channel: "SavingsCO2",
-        }),
-        // Yearly CO2 savings - from Jan 1st of this year
-        api.getPvSystemAggregatedData(pvSystemId, {
-          from: getShortDateString(yearFromDate),
-          duration: yearDuration,
-          channel: "SavingsCO2",
-        }),
-        api.getPvSystemAggregatedData(pvSystemId, {
-          period: "total",
-          channel: "SavingsCO2",
-        }),
-        api.getCurrentWeather(pvSystemId),
-        api.getPvSystemMessages(pvSystemId, {
-          stateseverity: "Error",
-          limit: 10,
-          from: formatApiDateString(fromDate),
-          to: formatApiDateString(toDate),
-        }),
+        api.getConsolidatedDailyData(pvSystemId, todayDateString), // Use EST date instead of hardcoded
+        api.getConsolidatedWeeklyData(pvSystemId, getShortDateString(weekFromDate)),
+        api.getConsolidatedMonthlyData(pvSystemId, getShortDateString(monthFromDate).substring(0, 7)), // YYYY-MM format
+        api.getConsolidatedYearlyData(pvSystemId, getShortDateString(yearFromDate).substring(0, 4)), // YYYY format
         api.getPvSystemDevices(pvSystemId),
       ]);
 
       // Set State based on results
-      if (details.status === "fulfilled") setPvSystemDetails(details.value);
+      if (details.status === "fulfilled") {
+        setPvSystemDetails(details.value);
+      } 
       else {
         console.error("Failed Details:", details.reason);
         throw details.reason;
       } // Throw if essential details fail
 
-      if (flow.status === "fulfilled") setFlowData(flow.value);
-      else console.error("Failed Flow:", flow.reason);
-
-      if (aggrToday.status === "fulfilled")
-        setAggregatedDataToday(aggrToday.value);
-      else console.error("Failed Aggr Today:", aggrToday.reason);
-
-      // Set period data
-      if (aggrWeek.status === "fulfilled") {
-        const totalWeeklyEnergy = aggrWeek.value.data.reduce((total, item) => {
-          const value = findChannelValue(
-            item.channels,
-            "EnergyProductionTotal"
-          );
-          return total + (value || 0);
-        }, 0);
-        setWeeklyEnergyProduction(totalWeeklyEnergy);
-      } else console.error("Failed Aggr Week:", aggrWeek.reason);
-
-      if (aggrMonth.status === "fulfilled") {
-        const totalMonthlyEnergy = aggrMonth.value.data.reduce(
-          (total, item) => {
-            const value = findChannelValue(
-              item.channels,
-              "EnergyProductionTotal"
-            );
-            return total + (value || 0);
-          },
-          0
-        );
-        setMonthlyEnergyProduction(totalMonthlyEnergy);
-      } else console.error("Failed Aggr Month:", aggrMonth.reason);
-
-      if (aggrYear.status === "fulfilled") {
-        const totalYearlyEnergy = aggrYear.value.data.reduce((total, item) => {
-          const value = findChannelValue(
-            item.channels,
-            "EnergyProductionTotal"
-          );
-          return total + (value || 0);
-        }, 0);
-        setYearlyEnergyProduction(totalYearlyEnergy);
-      } else console.error("Failed Aggr Year:", aggrYear.reason);
-
-      if (aggrTotal.status === "fulfilled")
-        setAggregatedDataTotal(aggrTotal.value);
-      else console.error("Failed Aggr Total:", aggrTotal.reason);
-
-      if (weather.status === "fulfilled") setWeatherData(weather.value);
-      else console.error("Failed Weather:", weather.reason);
-
-      if (msgs.status === "fulfilled") {
-        // Check if we got valid messages back
-        if (Array.isArray(msgs.value)) {
-          setMessages(msgs.value);
-          console.log(
-            `Loaded ${msgs.value.length} error messages for system ${pvSystemId}`
-          );
-        } else {
-          console.warn("Unexpected message format:", msgs.value);
-          setMessages([]); // Default to empty array
-        }
+      // Process consolidated daily data
+      if (consolidatedDaily.status === "fulfilled") {
+        const dailyData = consolidatedDaily.value;
+        console.log("jConsolidated Daily Data:", dailyData);
+        setConsolidatedDailyData(dailyData);
+    
       } else {
-        console.error("Failed to fetch Messages:", msgs.reason);
-        setMessages([]); // Default to empty array on error
+        console.error("=== FAILED CONSOLIDATED DAILY ===");
+        console.error("Daily error:", consolidatedDaily.reason);
+        // Set defaults
+        setConsolidatedDailyData(null);
+      }
+
+      // Process consolidated weekly data
+      if (consolidatedWeekly.status === "fulfilled") {
+        const weeklyData = consolidatedWeekly.value;
+        console.log("jConsolidated Weekly Data:", weeklyData);
+        setConsolidatedWeeklyData(weeklyData);
+   
+      } else {
+        console.error("=== FAILED CONSOLIDATED WEEKLY ===");
+        console.error("Weekly error:", consolidatedWeekly.reason);
+        setConsolidatedWeeklyData(null);
+      }
+
+      // Process consolidated monthly data
+      if (consolidatedMonthly.status === "fulfilled") {
+        const monthlyData = consolidatedMonthly.value;
+        console.log("jConsolidated Monthly Data:", monthlyData);
+        setConsolidatedMonthlyData(monthlyData);
+      } else {
+        console.error("=== FAILED CONSOLIDATED MONTHLY ===");
+        console.error("Monthly error:", consolidatedMonthly.reason);
+        setConsolidatedMonthlyData(null);
+      }
+
+      // Process consolidated yearly data
+      if (consolidatedYearly.status === "fulfilled") {
+        const yearlyData = consolidatedYearly.value;
+        console.log("jConsolidated Yearly Data:", yearlyData);
+        setConsolidatedYearlyData(yearlyData);
+        
+       
+      } else {
+        console.error("=== FAILED CONSOLIDATED YEARLY ===");
+        console.error("Yearly error:", consolidatedYearly.reason);
+        setConsolidatedYearlyData(null);
       }
 
       if (devs.status === "fulfilled")
         setDevices(devs.value ?? []); // Default to empty array if null
       else console.error("Failed Devices:", devs.reason);
 
-      // Set CO2 data for different periods
-      if (aggrCo2Today.status === "fulfilled") {
-        const co2Value = findChannelValue(
-          aggrCo2Today.value.data?.[0]?.channels,
-          "SavingsCO2"
-        );
-        setDailyCo2Savings(co2Value);
-      } else console.error("Failed CO2 Today:", aggrCo2Today.reason);
-
-      if (aggrCo2Week.status === "fulfilled") {
-        const totalWeeklyCo2 = aggrCo2Week.value.data.reduce((total, item) => {
-          const value = findChannelValue(item.channels, "SavingsCO2");
-          return total + (value || 0);
-        }, 0);
-        setWeeklyCo2Savings(totalWeeklyCo2);
-      } else console.error("Failed CO2 Week:", aggrCo2Week.reason);
-
-      if (aggrCo2Month.status === "fulfilled") {
-        const totalMonthlyCo2 = aggrCo2Month.value.data.reduce(
-          (total, item) => {
-            const value = findChannelValue(item.channels, "SavingsCO2");
-            return total + (value || 0);
-          },
-          0
-        );
-        setMonthlyCo2Savings(totalMonthlyCo2);
-      } else console.error("Failed CO2 Month:", aggrCo2Month.reason);
-
-      if (aggrCo2Year.status === "fulfilled") {
-        const totalYearlyCo2 = aggrCo2Year.value.data.reduce((total, item) => {
-          const value = findChannelValue(item.channels, "SavingsCO2");
-          return total + (value || 0);
-        }, 0);
-        setYearlyCo2Savings(totalYearlyCo2);
-      } else console.error("Failed CO2 Year:", aggrCo2Year.reason);
     } catch (err) {
       console.error("Error fetching PV system data:", err);
       setError(
@@ -659,22 +535,9 @@ export default function PvSystemDetailScreen() {
   };
 
   // Extract Key Data Points (with null checks) ---
-  const currentPowerOutput = findChannelValue(
-    flowData?.data?.channels,
-    "PowerPV"
-  );
-  const dailyEnergyProduction = findChannelValue(
-    aggregatedDataToday?.data?.[0]?.channels,
-    "EnergyProductionTotal"
-  );
-  const totalCo2Savings = findChannelValue(
-    aggregatedDataTotal?.data?.[0]?.channels,
-    "SavingsCO2"
-  );
-  const systemIsOnline = flowData?.status?.isOnline ?? false;
-  const latestErrorMessages = messages.filter(
-    (m) => m.stateSeverity === "Error"
-  );
+
+  const systemIsOnline = (consolidatedDailyData?.current_power_w ?? 0) > 0;
+  const latestErrorMessages: any[] = []; // No longer using error messages
 
   // Determine system status: offline, warning, or online
   const systemStatus = !systemIsOnline
@@ -690,15 +553,6 @@ export default function PvSystemDetailScreen() {
     offline: "#F44336", // Red
   };
 
-  const systemStatusColor = statusColors[systemStatus];
-
-  // Calculate earnings based on energy production and rate of $0.40/kWh
-  const calculateEarnings = (energyWh: number | null): string => {
-    if (energyWh === null) return "$0.00";
-    // Convert Wh to kWh and multiply by rate
-    const earningsDollars = (energyWh / 1000) * 0.4;
-    return `$${earningsDollars.toFixed(2)}`;
-  };
 
   // Dashboard data for swipeable cards - moved after variable declarations
   const dashboardData = [
@@ -709,27 +563,22 @@ export default function PvSystemDetailScreen() {
         {
           label: "Current Power",
           value:
-            currentPowerOutput !== null
-              ? `${(currentPowerOutput / 1000).toFixed(1)} kW`
-              : "0.0 W",
+          extractPowerFromConsolidatedData(consolidatedDailyData)
+    
         },
         {
           label: "Energy",
           value:
-            dailyEnergyProduction !== null
-              ? `${(dailyEnergyProduction / 1000).toFixed(1)} kWh`
-              : "0.0 Wh",
+          extractEnergyFromConsolidatedData(consolidatedDailyData)
         },
         {
           label: "CO₂ Saved",
           value:
-            dailyCo2Savings !== null
-              ? `${dailyCo2Savings.toFixed(1)} kg`
-              : "0.0 kg",
+          extractCO2FromConsolidatedData(consolidatedDailyData) + " kg"
         },
         {
           label: "Earnings",
-          value: calculateEarnings(dailyEnergyProduction),
+          value: "$" +extractEarningsFromConsolidatedData(consolidatedDailyData)
         },
         {
           label: "Expected Earnings",
@@ -744,27 +593,21 @@ export default function PvSystemDetailScreen() {
         {
           label: "Current Power",
           value:
-            currentPowerOutput !== null
-              ? `${(currentPowerOutput / 1000).toFixed(1)} kW`
-              : "0.0 W",
-        },
+          extractPowerFromConsolidatedData(consolidatedDailyData)
+        }, 
         {
           label: "Weekly Energy",
           value:
-            weeklyEnergyProduction !== null
-              ? `${(weeklyEnergyProduction / 1000).toFixed(1)} kWh`
-              : "0.0 Wh",
+          extractEnergyFromConsolidatedData(consolidatedWeeklyData)
         },
         {
           label: "CO₂ Saved",
           value:
-            weeklyCo2Savings !== null
-              ? `${weeklyCo2Savings.toFixed(1)} kg`
-              : "0.0 kg",
+          extractCO2FromConsolidatedData(consolidatedWeeklyData) + " kg"
         },
         {
           label: "Earnings",
-          value: calculateEarnings(weeklyEnergyProduction),
+          value: extractEarningsFromConsolidatedData(consolidatedWeeklyData) + " $"
         },
         {
           label: "Expected Earnings",
@@ -779,27 +622,21 @@ export default function PvSystemDetailScreen() {
         {
           label: "Monthly Energy",
           value:
-            monthlyEnergyProduction !== null
-              ? `${(monthlyEnergyProduction / 1000).toFixed(1)} kWh`
-              : "0.0 Wh",
+          extractEnergyFromConsolidatedData(consolidatedMonthlyData)
         },
         {
           label: "Avg Daily Energy",
           value:
-            monthlyEnergyProduction !== null
-              ? `${(monthlyEnergyProduction / 30 / 1000).toFixed(1)} kWh`
-              : "0.0 Wh",
+          extractEnergyFromConsolidatedData(consolidatedMonthlyData)
         },
         {
           label: "CO₂ Saved",
           value:
-            monthlyCo2Savings !== null
-              ? `${monthlyCo2Savings.toFixed(1)} kg`
-              : "0.0 kg",
+          extractCO2FromConsolidatedData(consolidatedMonthlyData) + " kg"
         },
         {
           label: "Earnings",
-          value: calculateEarnings(monthlyEnergyProduction),
+          value: extractEarningsFromConsolidatedData(consolidatedMonthlyData) + " $"
         },
         {
           label: "Expected Earnings",
@@ -814,27 +651,21 @@ export default function PvSystemDetailScreen() {
         {
           label: "Yearly Energy",
           value:
-            yearlyEnergyProduction !== null
-              ? `${(yearlyEnergyProduction / 1000).toFixed(1)} kWh`
-              : "0.0 Wh",
+          extractEnergyFromConsolidatedData(consolidatedYearlyData)
         },
         {
           label: "Avg Monthly Energy",
           value:
-            yearlyEnergyProduction !== null
-              ? `${(yearlyEnergyProduction / 12 / 1000).toFixed(1)} kWh`
-              : "0.0 Wh",
+          extractEnergyFromConsolidatedData(consolidatedYearlyData)
         },
         {
           label: "CO₂ Saved",
           value:
-            yearlyCo2Savings !== null
-              ? `${yearlyCo2Savings.toFixed(1)} kg`
-              : "0.0 kg",
+          extractCO2FromConsolidatedData(consolidatedYearlyData) + " kg"
         },
         {
           label: "Earnings",
-          value: calculateEarnings(yearlyEnergyProduction),
+          value: extractEarningsFromConsolidatedData(consolidatedYearlyData) + " $" 
         },
         {
           label: "Expected Earnings",
@@ -1542,31 +1373,7 @@ return (
               <Ionicons name="arrow-back" size={24} color={colors.text} />
             </TouchableOpacity>
           ),
-          headerRight: () =>
-            demoMode ? (
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <Text style={{ color: "#FF9800", marginRight: 8 }}>
-                  Demo Mode
-                </Text>
-                <TouchableOpacity onPress={toggleDemoMode}>
-                  <LocalIonicon
-                    name="bug"
-                    size={24}
-                    color="#FF9800"
-                    style={{ marginRight: 16 }}
-                  />
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity onPress={toggleDemoMode}>
-                <LocalIonicon
-                  name="bug-outline"
-                  size={24}
-                  color={colors.text}
-                  style={{ marginRight: 16 }}
-                />
-              </TouchableOpacity>
-            ),
+      
         }}
       />
       {/* Add the Navigation Bar */}
@@ -1855,128 +1662,13 @@ return (
               </View>
             </Animated.View>
 
-            {/* Error Messages Section (Conditional) */}
-            {(latestErrorMessages.length > 0 || demoMode) && (
-              <ThemedView
-                type="card"
-                style={[styles.section, { backgroundColor: colors.card }]}
-              >
-                <View style={styles.sectionHeader}>
-                  <LocalIonicon
-                    name="warning"
-                    size={24}
-                    color={statusColors.warning}
-                  />
-                  <ThemedText
-                    type="subtitle"
-                    style={[styles.sectionTitle, { color: statusColors.warning }]}
-                  >
-                    System Errors{" "}
-                    {latestErrorMessages.length > 0
-                      ? `(${latestErrorMessages.length})`
-                      : ""}
-                  </ThemedText>
-
-                  {demoMode && (
-                    <TouchableOpacity
-                      style={styles.demoButton}
-                      onPress={addDemoErrorMessage}
-                    >
-                      <ThemedText type="caption" style={{ color: "#FF9800" }}>
-                        + Add Demo Error
-                      </ThemedText>
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                {latestErrorMessages.length > 0 ? (
-                  latestErrorMessages.map((msg, idx) => (
-                    <View
-                      key={`error-${idx}`}
-                      style={[
-                        styles.errorItem,
-                        { borderBottomColor: colors.border },
-                      ]}
-                    >
-                      <View style={styles.errorHeader}>
-                        <LocalIonicon
-                          name="alert-circle"
-                          size={16}
-                          color={statusColors.warning}
-                        />
-                        <ThemedText type="error" style={styles.errorItemTitle}>
-                          {msg.text || "Unknown Error"}
-                        </ThemedText>
-                      </View>
-
-                      <View style={styles.errorDetails}>
-                        <View style={styles.errorDetail}>
-                          <ThemedText
-                            type="caption"
-                            style={styles.errorDetailLabel}
-                          >
-                            Error Code:
-                          </ThemedText>
-                          <ThemedText
-                            type="caption"
-                            style={styles.errorDetailValue}
-                          >
-                            {msg.stateCode || "N/A"}
-                          </ThemedText>
-                        </View>
-
-                        <View style={styles.errorDetail}>
-                          <ThemedText
-                            type="caption"
-                            style={styles.errorDetailLabel}
-                          >
-                            Device ID:
-                          </ThemedText>
-                          <ThemedText
-                            type="caption"
-                            style={styles.errorDetailValue}
-                          >
-                            {msg.deviceId || "System Level"}
-                          </ThemedText>
-                        </View>
-
-                        <View style={styles.errorDetail}>
-                          <ThemedText
-                            type="caption"
-                            style={styles.errorDetailLabel}
-                          >
-                            Type:
-                          </ThemedText>
-                          <ThemedText
-                            type="caption"
-                            style={styles.errorDetailValue}
-                          >
-                            {msg.stateType || "Unknown"}
-                          </ThemedText>
-                        </View>
-                      </View>
-
-                      <ThemedText type="caption" style={styles.errorTimestamp}>
-                        {formatDateTime(msg.logDateTime)}
-                      </ThemedText>
-                    </View>
-                  ))
-                ) : demoMode ? (
-                  <View style={styles.emptyErrorState}>
-                    <ThemedText type="caption">
-                      No errors found. Add a demo error using the button above.
-                    </ThemedText>
-                  </View>
-                ) : null}
-              </ThemedView>
-            )}
+            {/* Error Messages Section removed - no longer using getPvSystemMessages */}
           </>
         )}
       </ScrollView>
     </SafeAreaView>
   );
 }
-
 // --- Styles (Combined and refined from previous examples) ---
 const styles = StyleSheet.create({
   safeArea: {
@@ -2508,3 +2200,4 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 });
+

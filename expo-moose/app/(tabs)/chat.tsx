@@ -20,9 +20,9 @@ import { useTheme } from "@/hooks/useTheme";
 import { Ionicons } from "@expo/vector-icons";
 import KeyboardAwareView from "@/components/KeyboardAwareView";
 import { getJwtToken } from "@/api/api";
-import { getCurrentUser} from "@/utils/auth";
-import { User } from "@/utils/auth";
-import { getAccessibleSystems } from "@/utils/auth";
+import { getCurrentUser} from "@/utils/cognitoAuth";
+import { User } from "@/utils/cognitoAuth";
+import { getAccessibleSystems } from "@/utils/cognitoAuth";
 import * as api from "@/api/api";
 import { Picker } from '@react-native-picker/picker';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -357,7 +357,7 @@ export default function ChatScreen() {
           setLoadingSystems(true);
           
           // Get user's accessible system IDs
-          const systemIds = getAccessibleSystems(currentUser.id);
+          const systemIds = await getAccessibleSystems(currentUser.id);
           console.log("Accessible system IDs:", systemIds);
           
           // Fetch all systems

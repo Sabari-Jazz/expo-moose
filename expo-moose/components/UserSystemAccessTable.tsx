@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { View, StyleSheet, ScrollView } from "react-native";
 import { DataTable, Text, Button, Card, Divider } from "react-native-paper";
-import { getCurrentUser, getAccessibleSystems, User } from "@/utils/auth";
+import { getCurrentUser, getAccessibleSystems, User } from "@/utils/cognitoAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { PvSystemMetadata } from "@/api/api";
 
@@ -64,32 +64,67 @@ const UserSystemAccessTable = ({
     const fetchUserData = async () => {
       try {
         setLoading(true);
+        
+        // Mock systems data with complete PvSystemMetadata structure
+        const mockSystems: PvSystemMetadata[] = [
+          {
+            pvSystemId: "system1",
+            name: "Residential Solar Array 1",
+            address: {
+              city: "San Francisco",
+              country: "USA",
+              street: null,
+              state: null,
+              zipCode: null,
+            },
+            pictureURL: null,
+            peakPower: 5000,
+            installationDate: "2023-01-01T00:00:00Z",
+            lastImport: "2023-12-01T00:00:00Z",
+            meteoData: null,
+            timeZone: "America/Los_Angeles"
+          },
+          {
+            pvSystemId: "system2", 
+            name: "Commercial Solar Array 2",
+            address: {
+              city: "Los Angeles",
+              country: "USA",
+              street: null,
+              state: null,
+              zipCode: null,
+            },
+            pictureURL: null,
+            peakPower: 10000,
+            installationDate: "2023-02-01T00:00:00Z",
+            lastImport: "2023-12-01T00:00:00Z",
+            meteoData: null,
+            timeZone: "America/Los_Angeles"
+          },
+          {
+            pvSystemId: "system3",
+            name: "Industrial Solar Array 3", 
+            address: {
+              city: "San Diego",
+              country: "USA",
+              street: null,
+              state: null,
+              zipCode: null,
+            },
+            pictureURL: null,
+            peakPower: 15000,
+            installationDate: "2023-03-01T00:00:00Z",
+            lastImport: "2023-12-01T00:00:00Z",
+            meteoData: null,
+            timeZone: "America/Los_Angeles"
+          },
+        ];
 
-        if (propsSystems) {
-          setAllSystems(propsSystems);
-
-          if (propsAccessibleSystemIds) {
-            setAccessibleSystems(propsAccessibleSystemIds);
-          }
-
-          if (propsIsAdmin !== undefined) {
-            setUserIsAdmin(propsIsAdmin);
-          }
-
-          setLoading(false);
-          return;
-        }
-
-        const currentUser = userId ? null : await getCurrentUser();
-        const userToUse = userId || currentUser?.id;
-
-        if (userToUse) {
-          if (currentUser) {
-            setUser(currentUser);
-            setUserIsAdmin(currentUser.role === "admin");
-          }
-
-          const accessibleSystemIds = getAccessibleSystems(userToUse);
+        const currentUser = await getCurrentUser();
+        const userToUse = userId || currentUser?.id || "default";
+        
+        if (currentUser) {
+          const accessibleSystemIds = await getAccessibleSystems(userToUse);
           const isAdmin =
             currentUser?.role === "admin" || accessibleSystemIds.length === 0;
           setUserIsAdmin(isAdmin);

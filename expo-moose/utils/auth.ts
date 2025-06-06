@@ -14,6 +14,7 @@ export interface User {
   name: string;
   role: 'admin' | 'user';
   email: string;
+  systems: string[];
 }
 
 export interface SystemAccess {
@@ -29,7 +30,8 @@ const users: User[] = [
     password: 'admin123',
     name: 'Administrator',
     role: 'admin',
-    email: 'admin@gmail.com'
+    email: 'admin@gmail.com',
+    systems: []
   },
   {
     id: '2',
@@ -38,6 +40,7 @@ const users: User[] = [
     name: 'Ketan',
     role: 'user',
     email: 'ketan@gmail.com',
+    systems: []
   }
 ];
 
@@ -67,8 +70,14 @@ export async function authenticate(username: string, password: string): Promise<
   
   if (user) {
     // Store user info (without password) in secure store
-    const userInfo = { ...user };
-    delete userInfo.password;
+    const userInfo = { 
+      id: user.id,
+      username: user.username,
+      name: user.name,
+      role: user.role,
+      email: user.email,
+      systems: user.systems
+    };
     
     await save(AUTH_USER_KEY, JSON.stringify(userInfo));
     await save(AUTH_TOKEN_KEY, generateToken(user.id));

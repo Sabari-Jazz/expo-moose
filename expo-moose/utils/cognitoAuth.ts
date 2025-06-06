@@ -7,6 +7,7 @@ import {
   } from 'aws-amplify/auth';
   import { router } from 'expo-router';
   import { save, getValueFor, deleteValueFor } from './secureStore';
+  import { API_URL } from '@/constants/api';
   
   // Constants
   export const AUTH_USER_KEY = 'auth_user';
@@ -20,18 +21,8 @@ import {
     name: string;
     role: 'admin' | 'user';
     email: string;
+    systems: string[];
   }
-  
-  // Temporary system access
-  const systemAccess = [
-    {
-      userId: '2',
-      systemIds: [
-        "bf915090-5f59-4128-a206-46c73f2f779d",
-        "f2fafda2-9b07-40e3-875f-db6409040b9c"
-      ]
-    }
-  ];
   
   /**
    * Sign in a user with Cognito
@@ -47,12 +38,14 @@ import {
       
       // Test network connectivity first
       console.log('Testing network connectivity...');
+      /*
       try {
         const testResponse = await fetch('https://httpbin.org/get');
         console.log('Network test successful, status:', testResponse.status);
       } catch (networkError) {
         console.error('Network test failed:', networkError);
       }
+        */
 
       console.log('Attempting amplifySignIn...');
       let response;
@@ -156,6 +149,64 @@ import {
   }
   
   /**
+   * Fetch user profile from DynamoDB backend
+   */
+  async function fetchUserProfile(userId: string): Promise<{
+    email: string;
+    name: string;
+    role: 'admin' | 'user';
+    username: string;
+  } | null> {
+    try {
+      const response = await fetch(`${API_URL}/api/user/${userId}/profile`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        console.error(`Failed to fetch user profile: ${response.status}`);
+        return null;
+      }
+
+      const data = await response.json();
+      console.log('User profile data:', data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch user systems from DynamoDB backend
+   */
+  async function fetchUserSystems(userId: string): Promise<string[]> {
+    try {
+      const response = await fetch(`${API_URL}/api/user/${userId}/systems`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        console.error(`Failed to fetch user systems: ${response.status}`);
+        return [];
+      }
+      
+      const data = await response.json();
+      console.log('User systems data:', data);
+      // Expecting data to be an array of objects with systemid property
+      return data;
+    } catch (error) {
+      console.error('Error fetching user systems:', error);
+      return [];
+    }
+  }
+  
+  /**
    * Handle a successful Cognito sign-in
    */
   async function handleSuccessfulSignIn(username: string): Promise<User | null> {
@@ -167,19 +218,28 @@ import {
       if (!idToken || !accessToken) throw new Error('Missing tokens in session.');
   
       const userInfo = await getAmpUser();
-      const email = userInfo.signInDetails?.loginId || '';
-      const name = userInfo.username || username;
-  
-      let role: 'admin' | 'user' = 'user';
-      const adminUsernames = ['admin', 'administrator'];
-      if (adminUsernames.includes(username.toLowerCase())) role = 'admin';
-  
+      const userId = userInfo.userId; // This is the Cognito sub value
+      
+      console.log(`Fetching user data from backend for userId: ${userId}`);
+      
+      // Fetch user profile and systems from DynamoDB backend
+      const [userProfile, userSystems] = await Promise.all([
+        fetchUserProfile(userId),
+        fetchUserSystems(userId)
+      ]);
+
+      if (!userProfile) {
+        console.error('Failed to fetch user profile from backend');
+        throw new Error('Failed to fetch user profile');
+      }
+
       const user: User = {
-        id: userInfo.userId,
-        username,
-        name,
-        email,
-        role
+        id: userProfile.username, // Use username as id as specified
+        username: userProfile.username,
+        name: userProfile.name,
+        email: userProfile.email,
+        role: userProfile.role,
+        systems: userSystems
       };
   
       await save(AUTH_USER_KEY, JSON.stringify(user));
@@ -187,6 +247,7 @@ import {
       await save(ID_TOKEN_KEY, idToken);
   
       console.log('User signed in successfully:', user.username);
+      console.log('User has access to systems:', user.systems);
       return user;
     } catch (err: any) {
       console.error('Error handling successful sign in:', err.message);
@@ -222,13 +283,29 @@ import {
       const session = await fetchAuthSession();
       const idToken = session.tokens?.idToken?.toString() || '';
       const accessToken = session.tokens?.accessToken?.toString() || '';
-  
+      
+      const userId = userInfo.userId; // This is the Cognito sub value
+      
+      console.log(`Fetching user data from backend for userId: ${userId}`);
+      
+      // Fetch user profile and systems from DynamoDB backend
+      const [userProfile, userSystems] = await Promise.all([
+        fetchUserProfile(userId),
+        fetchUserSystems(userId)
+      ]);
+
+      if (!userProfile) {
+        console.error('Failed to fetch user profile from backend');
+        return null;
+      }
+
       const user: User = {
-        id: userInfo.userId,
-        username: userInfo.username || '',
-        name: userInfo.username || '',
-        email: userInfo.signInDetails?.loginId || '',
-        role: 'user'
+        id: userProfile.username, // Use username as id as specified
+        username: userProfile.username,
+        name: userProfile.name,
+        email: userProfile.email,
+        role: userProfile.role,
+        systems: userSystems
       };
   
       await save(AUTH_USER_KEY, JSON.stringify(user));
@@ -236,7 +313,8 @@ import {
       if (accessToken) await save(ACCESS_TOKEN_KEY, accessToken);
   
       return user;
-    } catch {
+    } catch (error) {
+      console.error('Error getting current user:', error);
       return null;
     }
   }
@@ -248,8 +326,7 @@ import {
     const user = await getCurrentUser();
     if (user?.role === 'admin') return true;
   
-    const access = systemAccess.find(a => a.userId === userId);
-    return access ? access.systemIds.includes(systemId) : false;
+    return user?.systems.includes(systemId) || false;
   }
   
   /**
@@ -259,8 +336,7 @@ import {
     const user = await getCurrentUser();
     if (user?.role === 'admin') return [];
   
-    const access = systemAccess.find(a => a.userId === userId);
-    return access ? access.systemIds : [];
+    return user?.systems || [];
   }
   
   /**

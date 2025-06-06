@@ -14,7 +14,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useThemeColor } from "@/hooks/useThemeColor";
 import { LocalIonicon } from "./ui/LocalIonicon";
-import { getCurrentUser, getAccessibleSystems } from "@/utils/auth";
+import { getCurrentUser, getAccessibleSystems } from "@/utils/cognitoAuth";
 export type PvSystem = PvSystemMetadata;
 
 export default function PvSystemList() {
@@ -38,7 +38,7 @@ export default function PvSystemList() {
         }
 
         setIsAdmin(user.role === "admin");
-        const systemIds = getAccessibleSystems(user.id);
+        const systemIds = await getAccessibleSystems(user.id);
         setAccessibleSystemIds(systemIds);
       } catch (error) {
         console.error("Error getting accessible systems:", error);
@@ -104,9 +104,7 @@ export default function PvSystemList() {
   };
 
   const navigateToDetail = (pvSystem: PvSystem) => {
-    router.push({
-      pathname: `/pv-detail/${pvSystem.pvSystemId}`,
-    });
+    router.push(`/pv-detail/${pvSystem.pvSystemId}` as any);
   };
 
   if (loading) {

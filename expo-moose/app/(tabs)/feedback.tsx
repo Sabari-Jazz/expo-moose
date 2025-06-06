@@ -18,7 +18,7 @@ import { uploadFeedback, uploadFeedbackSupabase } from "@/services/feedbackServi
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import {Keyboard} from 'react-native'
-import { getCurrentUser} from "@/utils/auth";
+import { getCurrentUser} from "@/utils/cognitoAuth";
 import { getCurrentWeather } from "@/api/api";
 
 export default function FeedbackScreen() {

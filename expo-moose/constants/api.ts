@@ -4,8 +4,8 @@
 // - Use 'localhost' when testing in web or iOS simulator
 // - Use '10.0.2.2' when testing in Android emulator
 // - Use your machine's actual IP (e.g., '192.168.1.5') when testing on physical devices
-export const DEV_API_HOST = '172.17.161.41'; // Your actual development machine IP
-
+// export const DEV_API_HOST = '172.17.161.41'; // Your actual development machine IP
+export const DEV_API_HOST = '172.17.50.166'
 // API URL for development and production
 export const API_URL = __DEV__ 
   ? `http://${DEV_API_HOST}:8000` // Development API URL

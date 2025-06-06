@@ -13,3 +13,5 @@ requests==2.31.0
 mangum==0.19.0
 langchain==0.3.24
 typing-extensions==4.13.2
+boto3==1.34.0
+botocore==1.34.0

@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import { API_BASE_URL, ENDPOINTS } from '@/constants/api';
+import { API_BASE_URL, API_URL, ENDPOINTS } from '@/constants/api';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -491,6 +491,72 @@ async function apiRequest<T>(
     }
 }
 
+// --- Local Backend API request function (for your backend database) ---
+async function localApiRequest<T>(
+    endpoint: string,
+    method: string = 'GET',
+    queryParams: Record<string, any> = {},
+    body: any = null
+): Promise<T> {
+    try {
+        const requestHeaders: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+        };
+
+        const options: RequestInit = {
+            method,
+            headers: requestHeaders,
+            body: body ? JSON.stringify(body) : null
+        };
+
+        const queryString = buildQueryString(queryParams);
+        // Use API_URL for local backend calls
+        const normalizedBaseUrl = API_URL.replace(/\/+$/, '');
+        const normalizedEndpoint = endpoint.replace(/^\/+/, '');
+        const url = `${normalizedBaseUrl}/${normalizedEndpoint}${queryString}`;
+        console.log('Local API request URL:', url);
+
+        const response = await fetch(url, options);
+
+        // Handle different response statuses
+        if (!response.ok) {
+            let errorText = '';
+            let errorObject = null;
+            
+            // Try to get detailed error information
+            try {
+                const contentType = response.headers.get('Content-Type') || '';
+                if (contentType.includes('application/json')) {
+                    errorObject = await response.json();
+                    errorText = JSON.stringify(errorObject);
+                } else {
+                    errorText = await response.text();
+                }
+            } catch (parseError) {
+                console.warn("Failed to parse error response as JSON, reading as text.", parseError);
+                try {
+                    errorText = await response.text();
+                } catch (textError) {
+                    console.warn("Failed to get error text response", textError);
+                    errorText = "Body: ";
+                }
+            }
+            
+            const errorMessage = `HTTP error! Status: ${response.status} - ${errorText}`;
+            console.error(`Local API Error Details for ${url}:`, errorMessage);
+            throw new Error(errorMessage);
+        }
+
+        // Return data if we have a valid response
+        const responseData = await response.json();
+        return responseData;
+    } catch (error) {
+        console.error(`Local API request failed for endpoint "${endpoint}":`, error);
+        throw error;
+    }
+}
+
 
 // === API Function Definitions with Types ===
 
@@ -525,18 +591,6 @@ export const getPvSystemDetails = async (
     }
 };
 
-export const getPvSystemFlowData = async (
-    pvSystemId: string, timezone?: 'local' | 'zulu'
-): Promise<FlowDataResponse> => {
-     if (!pvSystemId) throw new Error("pvSystemId is required for getPvSystemFlowData");
-    try {
-        return await apiRequest<FlowDataResponse>(`pvsystems/${pvSystemId}/flowdata`, 'GET', { timezone });
-    } catch (error) {
-        console.error(`Failed to get flow data for PV system ${pvSystemId}`, error);
-        throw error;
-    }
-};
-
 export const getPvSystemAggregatedData = async (
     pvSystemId: string, params: AggregatedDataParams = {}
 ): Promise<AggregatedDataResponse> => {
@@ -558,6 +612,71 @@ export const getPvSystemHistoricalData = async (
         return await apiRequest<HistoricalDataResponse>(`pvsystems/${pvSystemId}/histdata`, 'GET', params);
     } catch (error) {
         console.error(`Failed to get historical data for PV system ${pvSystemId}`, error);
+        throw error;
+    }
+};
+
+// CONSOLIDATED DynamoDB API functions - replaces all separate functions
+export const getConsolidatedDailyData = async (
+    pvSystemId: string,
+    date?: string
+): Promise<any> => {
+    if (!pvSystemId) throw new Error("pvSystemId is required for getConsolidatedDailyData");
+    try {
+        const params: any = {};
+        if (date) params.date = date;
+        
+        return await localApiRequest<any>(`api/systems/${pvSystemId}/consolidated-daily`, 'GET', params);
+    } catch (error) {
+        console.error(`Failed to get consolidated daily data for PV system ${pvSystemId}`, error);
+        throw error;
+    }
+};
+
+export const getConsolidatedWeeklyData = async (
+    pvSystemId: string,
+    weekStart?: string
+): Promise<any> => {
+    if (!pvSystemId) throw new Error("pvSystemId is required for getConsolidatedWeeklyData");
+    try {
+        const params: any = {};
+        if (weekStart) params.week_start = weekStart;
+        
+        return await localApiRequest<any>(`api/systems/${pvSystemId}/consolidated-weekly`, 'GET', params);
+    } catch (error) {
+        console.error(`Failed to get consolidated weekly data for PV system ${pvSystemId}`, error);
+        throw error;
+    }
+};
+
+export const getConsolidatedMonthlyData = async (
+    pvSystemId: string,
+    month?: string
+): Promise<any> => {
+    if (!pvSystemId) throw new Error("pvSystemId is required for getConsolidatedMonthlyData");
+    try {
+        const params: any = {};
+        if (month) params.month = month;
+        
+        return await localApiRequest<any>(`api/systems/${pvSystemId}/consolidated-monthly`, 'GET', params);
+    } catch (error) {
+        console.error(`Failed to get consolidated monthly data for PV system ${pvSystemId}`, error);
+        throw error;
+    }
+};
+
+export const getConsolidatedYearlyData = async (
+    pvSystemId: string,
+    year?: string
+): Promise<any> => {
+    if (!pvSystemId) throw new Error("pvSystemId is required for getConsolidatedYearlyData");
+    try {
+        const params: any = {};
+        if (year) params.year = year;
+        
+        return await localApiRequest<any>(`api/systems/${pvSystemId}/consolidated-yearly`, 'GET', params);
+    } catch (error) {
+        console.error(`Failed to get consolidated yearly data for PV system ${pvSystemId}`, error);
         throw error;
     }
 };
@@ -607,6 +726,18 @@ export const getPvSystemDevices = async (
         return data?.devices || []; // Ensure array return
     } catch (error) {
         console.error(`Failed to get devices for PV system ${pvSystemId}`, error);
+        throw error;
+    }
+};
+
+export const getPvSystemFlowData = async (
+    pvSystemId: string, timezone?: 'local' | 'zulu'
+): Promise<FlowDataResponse> => {
+     if (!pvSystemId) throw new Error("pvSystemId is required for getPvSystemFlowData");
+    try {
+        return await apiRequest<FlowDataResponse>(`pvsystems/${pvSystemId}/flowdata`, 'GET', { timezone });
+    } catch (error) {
+        console.error(`Failed to get flow data for PV system ${pvSystemId}`, error);
         throw error;
     }
 };
