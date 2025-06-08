@@ -681,6 +681,16 @@ export const getConsolidatedYearlyData = async (
     }
 };
 
+export const getSystemProfile = async (pvSystemId: string): Promise<any> => {
+    if (!pvSystemId) throw new Error("pvSystemId is required for getSystemProfile");
+    try {
+        return await localApiRequest<any>(`api/systems/${pvSystemId}/profile`, 'GET');
+    } catch (error) {
+        console.error(`Failed to get system profile for PV system ${pvSystemId}`, error);
+        throw error;
+    }
+};
+
 export const getPvSystemMessages = async (
     pvSystemId: string, params: SystemMessagesParams = {}, language?: string
 ): Promise<SystemMessage[]> => {

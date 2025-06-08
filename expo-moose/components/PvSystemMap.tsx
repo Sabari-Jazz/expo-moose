@@ -11,7 +11,7 @@ import {
   Modal,
 } from "react-native";
 import MapView, { Marker, Callout, PROVIDER_GOOGLE } from "react-native-maps";
-import { getPvSystems, getPvSystemFlowData } from "@/api/api";
+import { getSystemProfile, getConsolidatedDailyData } from "@/api/api";
 import { PvSystem } from "./PvSystemList";
 import {
   geocodeAddress,
@@ -25,6 +25,7 @@ import { ThemedView } from "./ThemedView";
 import { ThemedText } from "./ThemedText";
 import { useThemeColor } from "@/hooks/useThemeColor";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getCurrentUser } from "@/utils/cognitoAuth";
 
 interface PvSystemWithCoords extends PvSystem {
   coords: {
@@ -34,14 +35,7 @@ interface PvSystemWithCoords extends PvSystem {
   status: "online" | "warning" | "offline";
 }
 
-// For systems that may have undefined coords
-interface PartialPvSystemWithCoords extends PvSystem {
-  coords?: {
-    latitude: number;
-    longitude: number;
-  };
-  status?: "online" | "warning" | "offline";
-}
+
 
 interface PvSystemMapProps {
   selectedPvSystemId?: string;
@@ -166,88 +160,130 @@ export default function PvSystemMap({
     }
   };
 
-  // get boolean status of system
-  const getStatus = async(system: PvSystem) => {
-    const data = await getPvSystemFlowData(system.pvSystemId);
-    return data.status.isOnline;
+  // get boolean status of system from consolidated daily data
+  const getStatus = async(systemId: string) => {
+    try {
+      const today = new Date();
+      const formatter = new Intl.DateTimeFormat('en-CA', { 
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: '2-digit', 
+        day: '2-digit'
+      });
+      const todayDateString = formatter.format(today);
+      
+      const consolidatedData = await getConsolidatedDailyData(systemId, todayDateString);
+      return consolidatedData?.status === "online";
+    } catch (error) {
+      console.warn(`Failed to get status for system ${systemId}:`, error);
+      return false;
+    }
   }
-  // Fetch data from API
+
+  // Fetch data from database using user's accessible systems
   const fetchData = async () => {
     try {
       setInternalLoading(true);
-      console.log(`PVMAP: Starting to fetch PV system data...`);
+      console.log(`PVMAP: Starting to fetch PV system data from database...`);
 
-      const data = await getPvSystems();
-
-      if (!data || data.length === 0) {
-        setError("No PV systems found. Please check your data source.");
+      // Get current user and their accessible systems
+      const user = await getCurrentUser();
+      if (!user) {
+        setError("Unable to get current user.");
         setInternalLoading(false);
         return;
       }
 
-      console.log(`PVMAP: Fetched ${data.length} PV systems from API`);
+      let systemIds: string[] = [];
+      if (user.role === "admin") {
+        // For admin users, we'd need to get all system IDs
+        // For now, we'll use their systems list if available
+        systemIds = (user.systems as string[]) || [];
+      } else {
+        // Regular user: use their assigned systems
+        systemIds = (user.systems as string[]) || [];
+      }
 
-      // Process systems with coordinates and status
+      if (systemIds.length === 0) {
+        console.log(`User ${user.name} has no systems assigned`);
+        setPvSystems([]);
+        setError(null);
+        setInternalLoading(false);
+        return;
+      }
+
+      console.log(`PVMAP: Fetching profiles for ${systemIds.length} systems assigned to user`);
+
+      // Fetch system profiles from database
       const systemsWithCoords = await Promise.all(
-        data.map(async (system) => {
+        systemIds.map(async (systemId) => {
           try {
-            let coords;
-
-            // First try to get coordinates directly from the system data
-            const existingCoords = getCoordinatesFromSystem(system);
-            const systemStatus = await getStatus(system);
-            if (existingCoords) {
-              console.log(
-                `Using existing coordinates for system ${
-                  system.name
-                }: ${JSON.stringify(existingCoords)}`
-              );
-              coords = existingCoords;
+            console.log(`Fetching profile for system: ${systemId}`);
+            
+            // Get system profile from database
+            const profileData = await getSystemProfile(systemId);
+            if (!profileData) {
+              console.warn(`No profile found for system ${systemId}`);
+              return null;
             }
-            // Then try geocoding if necessary
-            else if (
-              system.address &&
-              system.address.street &&
-              system.address.city &&
-              (system.address.zipCode || system.address.state) &&
-              system.address.country
-            ) {
+
+            // Extract address information from profile
+            const address = {
+              street: profileData.street || null,
+              city: profileData.city || null,
+              zipCode: profileData.zipCode || null,
+              state: profileData.state || null,
+              country: profileData.country || null,
+            };
+
+            // Try to get coordinates from profile data first
+            let coords = getCoordinatesFromSystem(profileData);
+            
+            // If no coordinates in profile, try geocoding the address
+            if (!coords && address.city && address.country) {
               const formattedAddress = formatAddress({
-                street: system.address.street,
-                city: system.address.city,
-                zipCode: system.address.zipCode || "",
-                country: system.address.country,
-                state: system.address.state || null,
+                street: address.street || "",
+                city: address.city || "",
+                zipCode: address.zipCode || "",
+                country: address.country || "",
+                state: address.state || null,
               });
 
               try {
                 coords = await geocodeAddress(formattedAddress);
-                console.log(
-                  `Successfully geocoded: ${
-                    system.name
-                  } at ${formattedAddress} -> ${JSON.stringify(coords)}`
-                );
+                console.log(`Successfully geocoded: ${profileData.name} at ${formattedAddress} -> ${JSON.stringify(coords)}`);
               } catch (geocodeErr) {
-                console.error(
-                  `Geocoding failed for ${system.name}, no coordinates available`,
-                  geocodeErr
-                );
+                console.error(`Geocoding failed for ${profileData.name}, no coordinates available`, geocodeErr);
                 return null;
               }
-            } else {
-              console.warn(`No location data for system ${system.name}`);
+            }
+
+            if (!coords) {
+              console.warn(`No coordinates available for system ${profileData.name}`);
               return null;
             }
 
-            // Set status as offline or online
-            let status = "offline";
-            if (systemStatus == true) {
-              status = "online";
-            }
+            // Get system status
+            const systemStatus = await getStatus(systemId);
 
-            return { ...system, coords, status };
+            // Create system object compatible with existing interface
+            const system = {
+              pvSystemId: systemId,
+              name: profileData.name || `System ${systemId}`,
+              address: address,
+              pictureURL: profileData.pictureUrl || null,
+              peakPower: profileData.peakPower || null,
+              installationDate: profileData.installationDate || new Date().toISOString(),
+              lastImport: profileData.lastImport || new Date().toISOString(),
+              meteoData: profileData.meteoData || null,
+              timeZone: profileData.timeZone || "America/New_York",
+              coords: coords,
+              status: systemStatus ? "online" : "offline"
+            };
+
+            return system;
           } catch (err) {
-            console.error(`Error processing system ${system.name}:`, err);
+            console.error(`Error processing system ${systemId}:`, err);
             return null;
           }
         })
@@ -262,65 +298,16 @@ export default function PvSystemMap({
           status: (system!.status || "offline") as "online" | "warning" | "offline"
         })) as PvSystemWithCoords[];
 
-      console.log(
-        `Processed ${validSystems.length} systems with valid coordinates`
-      );
+      console.log(`Processed ${validSystems.length} systems with valid coordinates from database`);
       
-      // Apply access filtering if provided
-      let accessibleSystems = validSystems;
-      console.log(`PVMAP: Starting with ${validSystems.length} valid systems before access filtering`);
-      
-      // Only apply access filtering if user data is fully loaded and not in loading state
-      if (hasAccessToSystem && !externalLoading) {
-        console.log(`PVMAP: hasAccessToSystem function provided and not loading, will filter systems`);
-        
-        // Log before filtering
-        console.log(`PVMAP: Before filtering: ${validSystems.length} systems with valid coordinates`);
-        
-        try {
-          // Apply access filter with strict error handling
-          const beforeCount = validSystems.length;
-          const filteredSystems = [];
-          
-          for (const system of validSystems) {
-            try {
-              const pvSystemId = system.pvSystemId;
-              const hasAccess = hasAccessToSystem(pvSystemId);
-              console.log(`PVMAP: System ${system.name} (${pvSystemId}) access: ${hasAccess ? 'GRANTED' : 'DENIED'}`);
-              if (hasAccess) {
-                filteredSystems.push(system);
-              }
-            } catch (error) {
-              console.error(`PVMAP: Error checking access for system ${system.name}:`, error);
-              // Do not include system if error occurs during access check
-            }
-          }
-          
-          accessibleSystems = filteredSystems;
-          console.log(`PVMAP: After filtering: User has access to ${accessibleSystems.length} of ${beforeCount} systems on the map`);
-        } catch (error) {
-          console.error("PVMAP: Error during access filtering:", error);
-          // In case of error, show no systems instead of all
-          accessibleSystems = [];
-          console.log("PVMAP: Error occurred - showing no systems for safety");
-        }
-      } else {
-        if (externalLoading) {
-          console.log(`PVMAP: External loading is true, skipping filtering until user data is loaded`);
-          // When loading, don't show any systems until user data is ready
-          accessibleSystems = [];
-        } else {
-          console.log(`PVMAP: No hasAccessToSystem function provided, showing all ${validSystems.length} systems`);
-        }
-      }
-      
-      console.log(`PVMAP: Setting state with ${accessibleSystems.length} accessible systems`);
-      setPvSystems(accessibleSystems);
+      // Since we're already filtering by user access when getting systemIds,
+      // we don't need additional access filtering here
+      setPvSystems(validSystems);
 
       // Calculate map region to fit all pins
-      if (accessibleSystems.length > 0) {
+      if (validSystems.length > 0) {
         if (selectedPvSystemId) {
-          const selectedSystem = accessibleSystems.find(
+          const selectedSystem = validSystems.find(
             (system) => system.pvSystemId === selectedPvSystemId
           );
           if (selectedSystem?.coords) {
@@ -342,7 +329,7 @@ export default function PvSystemMap({
           let minLng = Number.MAX_VALUE;
           let maxLng = -Number.MAX_VALUE;
 
-          accessibleSystems.forEach((system) => {
+          validSystems.forEach((system) => {
             if (system.coords) {
               minLat = Math.min(minLat, system.coords.latitude);
               maxLat = Math.max(maxLat, system.coords.latitude);
@@ -367,7 +354,7 @@ export default function PvSystemMap({
             longitudeDelta: finalLngDelta,
           });
         }
-      } else if (accessibleSystems.length === 0) {
+      } else {
         // No systems visible, show a zoomed out view
         setRegion({
           latitude: 45.4215, // Default to Ottawa, Canada
@@ -379,8 +366,8 @@ export default function PvSystemMap({
 
       setError(null);
     } catch (err) {
-      console.error("Error fetching PV systems:", err);
-      setError("Failed to load PV systems. Please try again later.");
+      console.error("Error fetching PV systems from database:", err);
+      setError("Failed to load PV systems from database. Please try again later.");
     } finally {
       setInternalLoading(false);
     }

@@ -1739,6 +1739,56 @@ async def get_system_consolidated_yearly_data(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/api/systems/{system_id}/profile")
+async def get_system_profile_data(system_id: str):
+    """
+    API endpoint to get system profile data from DynamoDB
+    """
+    logger.info(f"=== API ENDPOINT: /api/systems/{system_id}/profile ===")
+    logger.info(f"Parameters - system_id: {system_id}")
+    
+    if not table:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        # Query DynamoDB for system profile
+        response = table.get_item(
+            Key={
+                'PK': f'System#{system_id}',
+                'SK': 'PROFILE'
+            }
+        )
+        
+        if 'Item' not in response:
+            logger.warning(f"No profile found for system {system_id}")
+            raise HTTPException(status_code=404, detail=f"System profile not found for {system_id}")
+        
+        item = response['Item']
+        
+        # Convert Decimal types to float for JSON serialization
+        def convert_decimals(obj):
+            if isinstance(obj, dict):
+                return {k: convert_decimals(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_decimals(v) for v in obj]
+            elif isinstance(obj, Decimal):
+                return float(obj)
+            return obj
+        
+        profile_data = convert_decimals(item)
+        logger.info(f"Successfully retrieved profile for system {system_id}")
+        
+        return profile_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting system profile for {system_id}: {str(e)}")
+        import traceback
+        logger.error(f"Profile endpoint traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 #---------------------------------------
 # API Routes
 #---------------------------------------

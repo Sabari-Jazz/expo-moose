@@ -59,7 +59,7 @@ export default function DashboardScreen() {
 
   const SYSTEMS_PER_PAGE = 10;
 
-  // Helper function to format date for API calls
+ 
 
   // Helper function to format energy with automatic unit conversion
   const formatEnergyValue = (energyWh: number): string => {
@@ -540,7 +540,7 @@ export default function DashboardScreen() {
             iconColor={colors.primary}
             size={24}
             onPress={() => setUserMenuVisible(true)}
-            style={{ marginRight: -8 }}
+           
           />
         </View>
       </View>
@@ -667,7 +667,7 @@ const styles = StyleSheet.create({
   },
   headerButtons: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
   },
   searchContainer: {
     flexDirection: "row",
