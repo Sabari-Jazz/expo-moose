@@ -17,9 +17,9 @@ import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInUp, FadeOutDown } from "react-native-reanimated";
 import { StatusBar } from "expo-status-bar";
 import {
-  getPvSystems,
   getConsolidatedDailyData,
   PvSystemMetadata,
+  getSystemProfile,
 } from "@/api/api";
 import { getCurrentUser } from "@/utils/cognitoAuth";
 import StatusIcon from "@/components/StatusIcon";
@@ -58,8 +58,6 @@ export default function DashboardScreen() {
   const [userMenuVisible, setUserMenuVisible] = useState(false);
 
   const SYSTEMS_PER_PAGE = 10;
-
- 
 
   // Helper function to format energy with automatic unit conversion
   const formatEnergyValue = (energyWh: number): string => {
@@ -163,17 +161,11 @@ export default function DashboardScreen() {
       const user = await getCurrentUser();
       setCurrentUser(user);
 
+      // Both admin and regular users now get their systems from user.systems
       let systemsToLoad: string[] = [];
-
-      if (user?.role === "admin") {
-        // Admin: load all systems
-        const allSystemsData = await getPvSystems(0, 1000);
-        systemsToLoad = allSystemsData.map(system => system.pvSystemId);
-        console.log(`Admin loading all ${systemsToLoad.length} systems`);
-      } else if (user && 'systems' in user && user.systems && (user.systems as string[]).length > 0) {
-        // Regular user: load only their systems
+      if (user && 'systems' in user && user.systems && (user.systems as string[]).length > 0) {
         systemsToLoad = user.systems as string[];
-        console.log(`User ${user.name} loading ${systemsToLoad.length} assigned systems`);
+        console.log(`User ${user.name} (${user.role}) loading ${systemsToLoad.length} systems`);
       } else {
         // No systems assigned
         console.log(`User ${user?.name} has no systems assigned`);
@@ -192,26 +184,38 @@ export default function DashboardScreen() {
         return;
       }
 
-      // Get system metadata
-      let systemsMetadata: PvSystemMetadata[] = [];
-      if (user?.role === "admin") {
-        systemsMetadata = await getPvSystems(0, 1000);
-      } else {
-        // For regular users, we need to get individual system details
-        const systemsMetadataResults = await Promise.all(
-          systemsToLoad.map(async (systemId) => {
-            try {
-              return await getPvSystems(0, 1000).then(systems => 
-                systems.find(s => s.pvSystemId === systemId)
-              );
-            } catch (error) {
-              console.error(`Error fetching system ${systemId}:`, error);
+      // Get system metadata efficiently - fetch only the systems the user has access to
+      const systemsMetadata = await Promise.all(
+        systemsToLoad.map(async (systemId) => {
+          try {
+            const systemProfile = await getSystemProfile(systemId);
+            if (!systemProfile) {
+              console.warn(`No profile found for system ${systemId}`);
               return null;
             }
-          })
-        );
-        systemsMetadata = systemsMetadataResults.filter((system): system is PvSystemMetadata => system !== null);
-      }
+            
+            // Convert to PvSystemMetadata format
+            return {
+              pvSystemId: systemId,
+              name: systemProfile.name || `System ${systemId}`,
+              address: {
+                street: systemProfile.street || "",
+                city: systemProfile.city || "",
+                state: systemProfile.state || "",
+                country: systemProfile.country || "",
+              },
+              pictureURL: systemProfile.pictureUrl || null,
+              peakPower: systemProfile.peakPower || 25000,
+              lastImport: systemProfile.lastImport || new Date().toISOString(),
+            } as PvSystemMetadata;
+          } catch (error) {
+            console.error(`Error fetching system ${systemId}:`, error);
+            return null;
+          }
+        })
+      );
+      
+      const validSystemsMetadata = systemsMetadata.filter((system): system is PvSystemMetadata => system !== null);
 
       // Get today's date for consolidated data
       const today = new Date();
@@ -225,7 +229,7 @@ export default function DashboardScreen() {
 
       // Load consolidated data for each system
       const enhancedSystems = await Promise.all(
-        systemsMetadata.map(async (system) => {
+        validSystemsMetadata.map(async (system) => {
           try {
             console.log(`Loading consolidated data for system: ${system.name}`);
 

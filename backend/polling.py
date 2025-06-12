@@ -64,6 +64,9 @@ EARNINGS_RATE_PER_KWH = 0.40  # $0.40 per kWh
 dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 table = dynamodb.Table(DYNAMODB_TABLE_NAME)
 
+# Initialize SNS client
+sns = boto3.client('sns', region_name=AWS_REGION)
+
 # JWT token cache
 _jwt_token_cache = {
     'token': None,
@@ -587,6 +590,44 @@ def lambda_handler(event, context):
             })
         }
 
+def test_sns():
+    """Send a simple test message to the SNS topic"""
+    try:
+        topic_arn = "arn:aws:sns:us-east-1:381492109487:solarSystemAlerts"
+        
+        message = {
+            "default": "Test message from Solar Polling Script",
+            "subject": "SNS Test Alert",
+            "timestamp": datetime.utcnow().isoformat(),
+            "message": "This is a test message to verify SNS functionality"
+        }
+        
+        response = sns.publish(
+            TopicArn=topic_arn,
+            Subject="Solar System Test Alert",
+            Message=json.dumps(message),
+            MessageStructure='json',
+            MessageAttributes={
+                'source': {
+                    'DataType': 'String',
+                    'StringValue': 'polling-script'
+                },
+                'test': {
+                    'DataType': 'String', 
+                    'StringValue': 'true'
+                }
+            }
+        )
+        
+        logger.info(f"✅ Test SNS message sent successfully. Message ID: {response['MessageId']}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Error sending test SNS message: {str(e)}")
+        return False
+
 if __name__ == "__main__":
     result = process_systems_concurrently()
     print(json.dumps(result, indent=2)) 
+    test_sns()
+    print("SNS test completed")

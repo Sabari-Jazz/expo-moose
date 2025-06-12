@@ -756,7 +756,7 @@ def get_flow_data(system_id: str, jwt_token: str = None) -> Dict[str, Any]:
         print(f"Error fetching flow data: {e}")
         return {"error": f"Failed to fetch flow data: {str(e)}"}
 
-def search_vector_db(query: str, limit: int = 3) -> List[Dict[str, Any]]:
+def search_vector_db(query: str, limit: int = 100) -> List[Dict[str, Any]]:
     """
     Search the vector database for relevant documents.
     
@@ -776,6 +776,12 @@ def search_vector_db(query: str, limit: int = 3) -> List[Dict[str, Any]]:
     try:
         # Search the vector store directly
         results = rag.retriever.get_relevant_documents(query)
+        print(f"\n===== RETRIEVED {len(results[:limit])} CHUNKS FROM KNOWLEDGE BASE =====")
+        for i, doc in enumerate(results[:limit]):
+            print(f"\n=====CHUNK {i+1}=====")
+            print(f"Content: {doc.page_content}")
+            print(f"Metadata: {doc.metadata}")
+            print("=" * 50)
         
         # Convert to the expected format
         return [
@@ -959,7 +965,7 @@ class SolarAssistantRAG:
     
     def __init__(self):
         """Initialize the RAG system."""
-        self.embeddings = OpenAIEmbeddings(api_key=api_key, model="text-embedding-3-small")
+        self.embeddings = OpenAIEmbeddings(api_key=api_key, model="text-embedding-3-large")
         self.vector_store = None
         self.retriever = None
         self.llm = ChatOpenAI(api_key=api_key, model_name="gpt-4.1-mini", temperature=0.0)
@@ -979,9 +985,11 @@ class SolarAssistantRAG:
             # Initialize Pinecone with hardcoded namespace
             pc = Pinecone(api_key=pinecone_api_key)
             index = pc.Index(host=pinecone_host)
-            vector_store = PineconeVectorStore(index=index, embedding=self.embeddings, namespace="LDML")
+            # vector_store = PineconeVectorStore(index=index, embedding=self.embeddings, namespace="LDML")
+            vector_store = PineconeVectorStore(index=index, embedding=self.embeddings, namespace="OM")
             self.vector_store = vector_store
-            self.retriever = self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 3})
+            #   self.retriever = self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 3})
+            self.retriever = self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 7})
 
         except Exception as e:
             print(f"Error loading knowledge base: {e}")
@@ -1183,7 +1191,7 @@ class SolarAssistantRAG:
 
                 # Simulate a call to search_vector_db
                 function_name = "search_vector_db"
-                function_args = {"query": query, "limit": 3}
+                function_args = {"query": query, "limit": 100}
 
                 # Execute the function
                 function_response = FUNCTION_MAP[function_name](**function_args)
@@ -1431,16 +1439,13 @@ def register_device_in_db(device_data: DeviceRegistration) -> DeviceResponse:
         return DeviceResponse(success=False, message="Database not available")
     
     try:
-        # Create device record
+        # Create device record in the exact format requested
         device_item = {
-            'PK': f'User#{device_data.user_id}',
-            'SK': f'Device#{device_data.device_id}',
-            'userId': device_data.user_id,
-            'deviceId': device_data.device_id,
-            'expoPushToken': device_data.expo_push_token,
+            'PK': f'USER#{device_data.user_id}',
+            'SK': f'DEVICE#{device_data.device_id}',
+            'pushToken': device_data.expo_push_token,
             'platform': device_data.platform,
-            'createdAt': datetime.utcnow().isoformat(),
-            'updatedAt': datetime.utcnow().isoformat()
+            'createdAt': datetime.utcnow().isoformat() + 'Z'
         }
         
         # Upsert device (allow updates)
@@ -1456,6 +1461,32 @@ def register_device_in_db(device_data: DeviceRegistration) -> DeviceResponse:
         return DeviceResponse(
             success=False,
             message=f"Error registering device: {str(e)}"
+        )
+
+def delete_device_from_db(user_id: str, device_id: str) -> DeviceResponse:
+    """Delete a device registration from DynamoDB"""
+    if not table:
+        return DeviceResponse(success=False, message="Database not available")
+    
+    try:
+        # Delete device record using exact PK/SK format
+        table.delete_item(
+            Key={
+                'PK': f'USER#{user_id}',
+                'SK': f'DEVICE#{device_id}'
+            }
+        )
+        
+        return DeviceResponse(
+            success=True,
+            message=f"Device {device_id} deleted successfully",
+            device_id=device_id
+        )
+        
+    except Exception as e:
+        return DeviceResponse(
+            success=False,
+            message=f"Error deleting device: {str(e)}"
         )
 
 def link_user_to_system_in_db(link_data: SystemUserLink) -> SystemLinkResponse:
@@ -1506,15 +1537,52 @@ def get_user_systems(user_id: str) -> List[str]:
         return []
     
     try:
-        response = table.query(
-            KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
-            ExpressionAttributeValues={
-                ':pk': f'User#{user_id}',
-                ':sk': 'System#'
+        # First, get the user profile to check their role
+        profile_response = table.get_item(
+            Key={
+                'PK': f'User#{user_id}',
+                'SK': 'PROFILE'
             }
         )
         
-        return [item['systemId'] for item in response.get('Items', [])]
+        # Check if user profile exists and extract role
+        user_role = "user"  # default role
+        if 'Item' in profile_response:
+            user_role = profile_response['Item'].get('role', 'user')
+        
+        # If user is admin, return all systems
+        if user_role == "admin":
+            print(f"User {user_id} is admin, fetching all systems")
+            # Query for all system profiles (PK begins with "System#" and SK = "PROFILE")
+            response = table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr('PK').begins_with('System#') & 
+                               boto3.dynamodb.conditions.Attr('SK').eq('PROFILE')
+            )
+            
+            # Extract systemId from each system profile
+            system_ids = []
+            for item in response.get('Items', []):
+                # Extract system ID from PK (remove "System#" prefix)
+                system_id = item['PK'].replace('System#', '')
+                system_ids.append(system_id)
+            
+            print(f"Admin user {user_id} has access to {len(system_ids)} systems")
+            return system_ids
+        
+        else:
+            # Regular user - use existing logic
+            print(f"User {user_id} is regular user, fetching linked systems")
+            response = table.query(
+                KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
+                ExpressionAttributeValues={
+                    ':pk': f'User#{user_id}',
+                    ':sk': 'System#'
+                }
+            )
+            
+            system_ids = [item['systemId'] for item in response.get('Items', [])]
+            print(f"Regular user {user_id} has access to {len(system_ids)} systems")
+            return system_ids
         
     except Exception as e:
         print(f"Error getting user systems: {str(e)}")
@@ -1844,6 +1912,50 @@ async def get_user_systems_endpoint(user_id: str):
         
     except Exception as e:
         logger.error(f"Error in get_user_systems_endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/api/device/register", response_model=DeviceResponse)
+async def register_device_endpoint(device_data: DeviceRegistration):
+    """
+    Register a device for push notifications in DynamoDB
+    """
+    logger.info(f"POST /api/device/register - User: {device_data.user_id}, Device: {device_data.device_id}")
+    
+    try:
+        result = register_device_in_db(device_data)
+        logger.info(f"Device registration result: {result.message}")
+        
+        if not result.success:
+            raise HTTPException(status_code=400, detail=result.message)
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in register_device_endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.delete("/api/device/{user_id}/{device_id}", response_model=DeviceResponse)
+async def delete_device_endpoint(user_id: str, device_id: str):
+    """
+    Delete a device registration when user logs out
+    """
+    logger.info(f"DELETE /api/device/{user_id}/{device_id}")
+    
+    try:
+        result = delete_device_from_db(user_id, device_id)
+        logger.info(f"Device deletion result: {result.message}")
+        
+        if not result.success:
+            raise HTTPException(status_code=400, detail=result.message)
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in delete_device_endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 # Create a handler for AWS Lambda

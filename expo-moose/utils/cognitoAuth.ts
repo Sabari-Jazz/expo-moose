@@ -8,6 +8,7 @@ import {
   import { router } from 'expo-router';
   import { save, getValueFor, deleteValueFor } from './secureStore';
   import { API_URL } from '@/constants/api';
+  import { registerDeviceWithBackend, deleteDeviceFromBackend } from './deviceManager';
   
   // Constants
   export const AUTH_USER_KEY = 'auth_user';
@@ -243,11 +244,17 @@ import {
       };
   
       await save(AUTH_USER_KEY, JSON.stringify(user));
-      await save(ACCESS_TOKEN_KEY, accessToken);
-      await save(ID_TOKEN_KEY, idToken);
+      if (idToken) await save(ID_TOKEN_KEY, idToken);
+      if (accessToken) await save(ACCESS_TOKEN_KEY, accessToken);
+  
+      // Register device with backend (fire and forget, don't block user experience)
+      registerDeviceWithBackend(user.id).catch(error => {
+        console.log('Device registration failed (non-blocking):', error);
+      });
   
       console.log('User signed in successfully:', user.username);
       console.log('User has access to systems:', user.systems);
+
       return user;
     } catch (err: any) {
       console.error('Error handling successful sign in:', err.message);
@@ -260,6 +267,16 @@ import {
    */
   export async function signOut(): Promise<void> {
     try {
+      // Get current user to extract user ID for device deletion
+      const currentUser = await getCurrentUser();
+      
+      if (currentUser) {
+        // Delete device registration from backend (fire and forget, don't block sign out)
+        deleteDeviceFromBackend(currentUser.id).catch(error => {
+          console.log('Device deletion failed during sign out (non-blocking):', error);
+        });
+      }
+      
       await amplifySignOut();
       await deleteValueFor(AUTH_USER_KEY);
       await deleteValueFor(ACCESS_TOKEN_KEY);
@@ -311,6 +328,11 @@ import {
       await save(AUTH_USER_KEY, JSON.stringify(user));
       if (idToken) await save(ID_TOKEN_KEY, idToken);
       if (accessToken) await save(ACCESS_TOKEN_KEY, accessToken);
+  
+      // Register device with backend (fire and forget, don't block user experience)
+      registerDeviceWithBackend(user.id).catch(error => {
+        console.log('Device registration failed (non-blocking):', error);
+      });
   
       return user;
     } catch (error) {

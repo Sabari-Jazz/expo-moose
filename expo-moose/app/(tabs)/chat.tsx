@@ -30,9 +30,9 @@ import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import Constants from "expo-constants";
 
 // --- API Configuration ---
-//const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
+const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
 //const API_URL = "http://172.17.49.217:8000/chat";
-const API_URL = 
+//const API_URL = 
   Constants.expoConfig?.extra?.awsApiUrl || 
   process.env.AWS_API_URL;
 // --- API Call Function ---
@@ -192,14 +192,15 @@ const SystemSelector = ({
         <Modal
           visible={showSystemModal}
           transparent={true}
-          animationType="slide"
+          animationType="none"
           onRequestClose={() => setShowSystemModal(false)}
         >
-          <TouchableOpacity
-            style={styles.modalOverlay}
-            activeOpacity={1}
-            onPress={() => setShowSystemModal(false)}
-          >
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity
+              style={styles.modalOverlayTouch}
+              activeOpacity={1}
+              onPress={() => setShowSystemModal(false)}
+            />
             <View 
               style={[
                 styles.modalContent, 
@@ -256,7 +257,7 @@ const SystemSelector = ({
                 <Text style={styles.closeButtonText}>Close</Text>
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          </View>
         </Modal>
       )}
       
@@ -745,13 +746,18 @@ export default function ChatScreen() {
             />
           )}
           
-          {/* Loading indicator */}
+          {/* Loading indicator - positioned below messages */}
           {isLoading && (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={[styles.loadingText, { color: colors.text }]}>
-                Thinking{".".repeat(dotCount)}
-              </Text>
+              <View style={styles.loadingTextContainer}>
+                <Text style={[styles.loadingText, { color: colors.text }]}>
+                  Thinking
+                </Text>
+                <Text style={[styles.loadingDots, { color: colors.text }]}>
+                  {".".repeat(dotCount)}
+                </Text>
+              </View>
             </View>
           )}
         </View>
@@ -869,10 +875,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   loadingContainer: {
-    position: 'absolute',
-    bottom: 10,
-    left: 0,
-    right: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -880,10 +882,20 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.03)",
     borderRadius: 8,
     marginHorizontal: 10,
+    marginBottom: 10,
+  },
+  loadingTextContainer: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   loadingText: {
     marginLeft: 10,
     fontSize: 14,
+  },
+  loadingDots: {
+    fontSize: 14,
+    width: 20, // Fixed width to prevent shifting
+    textAlign: 'left',
   },
   inputContainer: {
     flexDirection: "row",
@@ -995,6 +1007,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  modalOverlayTouch: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   modalContent: {
     width: '80%',
