@@ -47,13 +47,13 @@ def validate_env_vars():
 validate_env_vars()
 
 API_BASE_URL = os.environ.get('API_BASE_URL', 'https://api.solarweb.com/swqapi')
-ACCESS_KEY_ID = os.environ.get('SOLAR_WEB_ACCESS_KEY_ID', 'FKIA08F3E94E3D064B629EE82A44C8D1D0A6')
-ACCESS_KEY_VALUE = os.environ.get('SOLAR_WEB_ACCESS_KEY_VALUE', '2f62d6f2-77e6-4796-9fd1-5d74b5c6474c')
+ACCESS_KEY_ID = os.environ.get('SOLAR_WEB_ACCESS_KEY_ID', 'FKIAD151D135048B4C709FFA341FF599BA72')
+ACCESS_KEY_VALUE = os.environ.get('SOLAR_WEB_ACCESS_KEY_VALUE', '77619b46-d62d-495d-8a07-aeaa8cf4b228')
 USER_ID = os.environ.get('SOLAR_WEB_USERID', 'monitoring@jazzsolar.com')
 PASSWORD = os.environ.get('SOLAR_WEB_PASSWORD', 'solar123')
 
 # AWS Configuration
-AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+AWS_REGION = os.environ.get('AWS_REGION_', 'us-east-1')
 DYNAMODB_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME', 'Moose-DDB')
 
 # Configuration constants
@@ -590,44 +590,7 @@ def lambda_handler(event, context):
             })
         }
 
-def test_sns():
-    """Send a simple test message to the SNS topic"""
-    try:
-        topic_arn = "arn:aws:sns:us-east-1:381492109487:solarSystemAlerts"
-        
-        message = {
-            "default": "Test message from Solar Polling Script",
-            "subject": "SNS Test Alert",
-            "timestamp": datetime.utcnow().isoformat(),
-            "message": "This is a test message to verify SNS functionality"
-        }
-        
-        response = sns.publish(
-            TopicArn=topic_arn,
-            Subject="Solar System Test Alert",
-            Message=json.dumps(message),
-            MessageStructure='json',
-            MessageAttributes={
-                'source': {
-                    'DataType': 'String',
-                    'StringValue': 'polling-script'
-                },
-                'test': {
-                    'DataType': 'String', 
-                    'StringValue': 'true'
-                }
-            }
-        )
-        
-        logger.info(f"✅ Test SNS message sent successfully. Message ID: {response['MessageId']}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Error sending test SNS message: {str(e)}")
-        return False
-
 if __name__ == "__main__":
     result = process_systems_concurrently()
     print(json.dumps(result, indent=2)) 
-    test_sns()
-    print("SNS test completed")
+    

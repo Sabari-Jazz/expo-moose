@@ -4,14 +4,14 @@ import boto3
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table('Moose-DDB')  # Replace with your table name
 
-# Function to scan and delete items with PK starting with 'System#' and SK equal to 'PROFILE'
-def delete_items_with_system_prefix_and_profile():
+# Function to scan and delete items with PK starting with 'System' and SK equal to 'STATUS'
+def delete_items_with_system_prefix_and_status():
     # Initial scan request with both conditions
     response = table.scan(
-        FilterExpression='begins_with(PK, :prefix) AND begins_with(SK, :sk_value)',
+        FilterExpression='begins_with(PK, :prefix) AND SK = :sk_value',
             ExpressionAttributeValues={
-                ':prefix': 'System#',
-                ':sk_value': 'DATA#'
+                ':prefix': 'System',
+                ':sk_value': 'STATUS'
         }
     )
 
@@ -22,10 +22,10 @@ def delete_items_with_system_prefix_and_profile():
     while 'LastEvaluatedKey' in response:
         response = table.scan(
             ExclusiveStartKey=response['LastEvaluatedKey'],
-            FilterExpression='begins_with(PK, :prefix) AND begins_with(SK, :sk_value)',
+            FilterExpression='begins_with(PK, :prefix) AND SK = :sk_value',
             ExpressionAttributeValues={
-                ':prefix': 'System#',
-                ':sk_value': 'DATA#'
+                ':prefix': 'System',
+                ':sk_value': 'STATUS'
             }
         )
         delete_items(response['Items'])
@@ -42,4 +42,4 @@ def delete_items(items):
         print(f"Deleted item with PK: {item['PK']} and SK: {item['SK']}")
 
 # Run the deletion process
-delete_items_with_system_prefix_and_profile()
+delete_items_with_system_prefix_and_status()

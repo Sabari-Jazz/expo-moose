@@ -18,7 +18,7 @@ import Animated, { FadeIn, SlideInUp } from "react-native-reanimated";
 import { useSession } from "@/utils/sessionContext";
 import { Image } from "expo-image";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { registerForPushNotificationsAsync, scheduleAllDailyNotifications } from "../services/NotificationService";
+import { registerForPushNotificationsAsync} from "../services/NotificationService";
 
 export default function LoginPage() {
   // Theme and device information
@@ -104,8 +104,7 @@ export default function LoginPage() {
                     const token = await registerForPushNotificationsAsync();
                     if (token) {
                       await AsyncStorage.setItem('notifications_enabled_key', 'true');
-                      // Schedule notifications if needed
-                      await scheduleAllDailyNotifications();
+
                       console.log("Notifications enabled successfully");
                     }
                     router.replace("/(tabs)/dashboard");

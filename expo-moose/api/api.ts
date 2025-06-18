@@ -570,6 +570,7 @@ export const getPvSystems = async (
         const data = await apiRequest<PvSystemsListResponse>(
             'pvsystems', 'GET', { offset: offset || 0, limit: limit || 1000, type }
         );
+        console.log('PV Systems:', data?.pvSystems);
         // Handle cases where the API might return null/undefined instead of an empty list
         return data?.pvSystems || [];
     } catch (error) {
@@ -743,11 +744,20 @@ export const getPvSystemDevices = async (
 export const getPvSystemFlowData = async (
     pvSystemId: string, timezone?: 'local' | 'zulu'
 ): Promise<FlowDataResponse> => {
-     if (!pvSystemId) throw new Error("pvSystemId is required for getPvSystemFlowData");
-    try {
-        return await apiRequest<FlowDataResponse>(`pvsystems/${pvSystemId}/flowdata`, 'GET', { timezone });
-    } catch (error) {
-        console.error(`Failed to get flow data for PV system ${pvSystemId}`, error);
-        throw error;
-    }
+    const params: Record<string, any> = {};
+    if (timezone) params.timezone = timezone;
+    
+    return apiRequest<FlowDataResponse>(
+        `pvsystems/${pvSystemId}/flowdata`,
+        'GET',
+        params
+    );
+};
+
+// Get system status from local backend DynamoDB
+export const getSystemStatus = async (systemId: string): Promise<any> => {
+    return localApiRequest<any>(
+        `api/systems/${systemId}/status`,
+        'GET'
+    );
 };

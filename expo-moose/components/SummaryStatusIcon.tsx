@@ -3,7 +3,6 @@ import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator } from "rea
 import { useTheme } from "@/hooks/useTheme";
 import { useSession, SystemStatus } from "@/utils/sessionContext";
 import { Ionicons } from "@expo/vector-icons";
-import { sendStatusNotification } from "@/services/NotificationService";
 
 interface SummaryStatusIconProps {
   showCount?: boolean;
@@ -42,24 +41,13 @@ const SummaryStatusIcon = React.memo(({
     }
   }, [systemStatuses]);
   
-  // Send notifications when status changes
+  // Track status changes for logging (removed notification sending)
   useEffect(() => {
     // Only process if we have data and are not in loading state
     if (!isLoading && overallStatus) {
       // If this is the first time we're setting the status or the status has changed
       if (previousStatusRef.current !== overallStatus) {
         console.log(`Status changed from ${previousStatusRef.current || 'initial'} to ${overallStatus}`);
-        
-        // Send a notification based on the new status
-        sendStatusNotification(overallStatus)
-          .then(notificationId => {
-            if (notificationId) {
-              console.log(`Status notification sent: ${notificationId}`);
-            }
-          })
-          .catch(error => {
-            console.error('Error sending status notification:', error);
-          });
           
         // Update the previous status
         previousStatusRef.current = overallStatus;

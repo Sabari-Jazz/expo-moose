@@ -32,9 +32,12 @@ import Constants from "expo-constants";
 // --- API Configuration ---
 const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
 //const API_URL = "http://172.17.49.217:8000/chat";
-//const API_URL = 
+/*
+const API_URL = 
   Constants.expoConfig?.extra?.awsApiUrl || 
   process.env.AWS_API_URL;
+  */
+// const API_URL = "https://ylqco43hbtyqzxgvmuks26efe40algqx.lambda-url.us-east-1.on.aws/";
 // --- API Call Function ---
 interface ChatRequest {
   username: string;

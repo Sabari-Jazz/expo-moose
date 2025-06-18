@@ -72,7 +72,7 @@ export async function getExpoPushToken(): Promise<string | null> {
 
     // Get the push token
     const token = (await Notifications.getExpoPushTokenAsync({
-      projectId: 'a6e0a3fc-5475-4e55-819f-8257b0ea3fb3', // Your existing project ID
+      projectId: 'f8b79784-8f4b-42a9-aa3c-e8a901abba87', // Your existing project ID
     })).data;
 
     console.log('Expo push token obtained:', token);

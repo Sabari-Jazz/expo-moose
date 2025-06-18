@@ -157,6 +157,7 @@ import {
     name: string;
     role: 'admin' | 'user';
     username: string;
+    userId: string;
   } | null> {
     try {
       const response = await fetch(`${API_URL}/api/user/${userId}/profile`, {
@@ -235,7 +236,7 @@ import {
       }
 
       const user: User = {
-        id: userProfile.username, // Use username as id as specified
+        id: userProfile.userId,
         username: userProfile.username,
         name: userProfile.name,
         email: userProfile.email,

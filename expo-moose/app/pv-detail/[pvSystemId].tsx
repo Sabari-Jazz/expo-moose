@@ -27,6 +27,7 @@ import { getCurrentUser, hasSystemAccess } from "@/utils/cognitoAuth";
 import { LineChart, BarChart } from "react-native-chart-kit";
 import WeatherWidget from '../../components/WeatherWidget';
 import StatusIcon from "@/components/StatusIcon";
+import PowerFlowDiagram from '../../components/PowerFlowDiagram';
 
 const findChannelValue = (
   channels:
@@ -1484,6 +1485,11 @@ return (
 
             {/* Weather Widget */}
             <WeatherWidget pvSystemId={pvSystemId}/>
+
+            {/* Power Flow Diagram */}
+            <Animated.View entering={FadeInUp.delay(150).springify()}>
+              <PowerFlowDiagram />
+            </Animated.View>
           </>
         )}
 

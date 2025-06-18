@@ -6,8 +6,10 @@ and error conditions for all PV systems. It updates DynamoDB when status changes
 and sends SNS notifications for status changes.
 
 Key Features:
+- Gets system list from DynamoDB instead of Fronius API for better performance
 - Polls current power and online status via flowdata API
 - Checks today's error messages for red errors
+- Pre-loads all error codes from Supabase for efficient lookup
 - Determines system status based on power and error conditions
 - Updates DynamoDB only when status changes
 - Sends SNS notifications for status changes
@@ -49,8 +51,8 @@ def validate_env_vars():
 validate_env_vars()
 
 API_BASE_URL = os.environ.get('API_BASE_URL', 'https://api.solarweb.com/swqapi')
-ACCESS_KEY_ID = os.environ.get('SOLAR_WEB_ACCESS_KEY_ID', 'FKIA08F3E94E3D064B629EE82A44C8D1D0A6')
-ACCESS_KEY_VALUE = os.environ.get('SOLAR_WEB_ACCESS_KEY_VALUE', '2f62d6f2-77e6-4796-9fd1-5d74b5c6474c')
+ACCESS_KEY_ID = os.environ.get('SOLAR_WEB_ACCESS_KEY_ID', 'FKIAD151D135048B4C709FFA341FF599BA72')
+ACCESS_KEY_VALUE = os.environ.get('SOLAR_WEB_ACCESS_KEY_VALUE', '77619b46-d62d-495d-8a07-aeaa8cf4b228')
 USER_ID = os.environ.get('SOLAR_WEB_USERID', 'monitoring@jazzsolar.com')
 PASSWORD = os.environ.get('SOLAR_WEB_PASSWORD', 'solar123')
 
@@ -78,6 +80,12 @@ table = dynamodb.Table(os.environ.get('DYNAMODB_TABLE_NAME', 'Moose-DDB'))
 # JWT token cache
 _jwt_token_cache = {
     'token': None,
+    'expires_at': None
+}
+
+# Error codes cache
+_error_codes_cache = {
+    'codes': None,
     'expires_at': None
 }
 
@@ -136,6 +144,49 @@ def get_jwt_token() -> str:
         except Exception as e:
             logger.error(f"Error obtaining JWT token: {str(e)}")
             raise
+
+def get_all_error_codes_from_supabase() -> Dict[int, str]:
+    """Get all error codes and their colors from Supabase with caching"""
+    global _error_codes_cache
+    
+    # Check if we have a valid cached response
+    if (_error_codes_cache['codes'] and _error_codes_cache['expires_at'] and 
+        datetime.utcnow() < _error_codes_cache['expires_at']):
+        logger.debug("Using cached error codes")
+        return _error_codes_cache['codes']
+    
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/error_codes"
+        headers = {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': f'Bearer {SUPABASE_ANON_KEY}',
+            'Content-Type': 'application/json'
+        }
+        
+        params = {
+            'select': 'code,colour'
+        }
+        
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        color_map = {}
+        for item in data:
+            if 'code' in item and 'colour' in item:
+                color_map[item['code']] = item['colour']
+        
+        # Cache the results for 1 hour
+        _error_codes_cache['codes'] = color_map
+        _error_codes_cache['expires_at'] = datetime.utcnow() + timedelta(hours=1)
+        
+        logger.info(f"Retrieved and cached {len(color_map)} error codes from Supabase")
+        return color_map
+        
+    except Exception as e:
+        logger.error(f"Error fetching all error codes from Supabase: {str(e)}")
+        return {}
 
 def api_request(endpoint: str, method: str = 'GET', params: Dict[str, Any] = None) -> Dict[str, Any]:
     """Make an authenticated request to the Solar.web API with retry logic"""
@@ -196,27 +247,30 @@ def api_request(endpoint: str, method: str = 'GET', params: Dict[str, Any] = Non
             raise
 
 def get_pv_systems() -> List[PvSystemMetadata]:
-    """Get a list of all PV systems"""
+    """Get a list of all PV systems from DynamoDB"""
     try:
-        response = api_request('pvsystems?offset=0&limit=100')
-        
-        if not response or 'pvSystems' not in response:
-            logger.warning("No PV systems found in the response")
-            return []
+        # Query for all system profiles (PK begins with "System#" and SK = "PROFILE")
+        response = table.scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr('PK').begins_with('System#') & 
+                           boto3.dynamodb.conditions.Attr('SK').eq('PROFILE')
+        )
         
         pv_systems = []
-        for system in response['pvSystems']:
-            if 'pvSystemId' in system and 'name' in system:
-                pv_systems.append(PvSystemMetadata(
-                    pv_system_id=system['pvSystemId'],
-                    name=system['name']
-                ))
+        for item in response.get('Items', []):
+            # Extract system ID from PK (remove "System#" prefix)
+            system_id = item['PK'].replace('System#', '')
+            system_name = item.get('name', item.get('pvSystemName', f'System {system_id}'))
+            
+            pv_systems.append(PvSystemMetadata(
+                pv_system_id=system_id,
+                name=system_name
+            ))
         
-        logger.info(f"Found {len(pv_systems)} PV systems")
+        logger.info(f"Found {len(pv_systems)} PV systems from DynamoDB")
         return pv_systems
         
     except Exception as e:
-        logger.error(f"Failed to get PV systems: {str(e)}")
+        logger.error(f"Failed to get PV systems from DynamoDB: {str(e)}")
         return []
 
 def get_system_flowdata(system_id: str) -> Dict[str, Any]:
@@ -229,38 +283,25 @@ def get_system_flowdata(system_id: str) -> Dict[str, Any]:
         return {}
 
 def get_error_code_colors_from_supabase(error_codes: List[int]) -> Dict[int, str]:
-    """Get error code colors from Supabase"""
+    """Get error code colors from cached Supabase data"""
     if not error_codes:
         return {}
     
     try:
-        url = f"{SUPABASE_URL}/rest/v1/error_codes"
-        headers = {
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': f'Bearer {SUPABASE_ANON_KEY}',
-            'Content-Type': 'application/json'
-        }
+        # Use the cached error codes
+        all_error_codes = get_all_error_codes_from_supabase()
         
-        params = {
-            'code': f'in.({",".join(map(str, error_codes))})',
-            'select': 'code,colour'
-        }
-        
-        response = requests.get(url, headers=headers, params=params, timeout=30)
-        response.raise_for_status()
-        
-        data = response.json()
-        
+        # Filter to only the codes we need
         color_map = {}
-        for item in data:
-            if 'code' in item and 'colour' in item:
-                color_map[item['code']] = item['colour']
+        for code in error_codes:
+            if code in all_error_codes:
+                color_map[code] = all_error_codes[code]
         
-        logger.info(f"Retrieved colors for {len(color_map)} error codes from Supabase")
+        logger.debug(f"Retrieved colors for {len(color_map)} of {len(error_codes)} requested error codes")
         return color_map
         
     except Exception as e:
-        logger.error(f"Error fetching error codes from Supabase: {str(e)}")
+        logger.error(f"Error getting error code colors: {str(e)}")
         return {}
 
 def get_system_status_from_db(system_id: str) -> Dict[str, Any]:
@@ -406,7 +447,13 @@ def process_system_status(system: PvSystemMetadata, target_date: datetime, stats
                 # No error messages - determine status based on current state and power
                 new_status = 'green' if current_status != 'red' or power > 0 else 'red'
                 if new_status == 'green':
-                    print(f"✅ {system.name}: status is GREEN because no error messages found")
+                    # Check if this is a recovery from red status (errors cleared)
+                    if current_status == 'red' and power > 0:
+                        # Red errors have been cleared and system is producing power - mark as resolved
+                        last_resolved_time = datetime.utcnow().isoformat()
+                        print(f"✅ {system.name}: status is GREEN because red errors cleared and producing {power}W (marking as resolved)")
+                    else:
+                        print(f"✅ {system.name}: status is GREEN because no error messages found")
                 else:
                     print(f"🔴 {system.name}: status is RED because previously red with no power ({power}W)")
             else:
@@ -508,8 +555,13 @@ def process_systems_concurrently():
         logger.info("Fetching JWT token...")
         get_jwt_token()
         
-        # Get all PV systems
-        logger.info("Fetching PV systems list...")
+        # Pre-load all error codes from Supabase for efficiency
+        logger.info("Pre-loading error codes from Supabase...")
+        error_codes_loaded = get_all_error_codes_from_supabase()
+        logger.info(f"Pre-loaded {len(error_codes_loaded)} error codes for efficient lookup")
+        
+        # Get all PV systems from DynamoDB
+        logger.info("Fetching PV systems list from DynamoDB...")
         pv_systems = get_pv_systems()
         
         if not pv_systems:

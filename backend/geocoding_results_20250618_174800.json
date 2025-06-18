@@ -1,0 +1,792 @@
+[
+  {
+    "system_id": "05f61e03-7d84-4b87-b33c-6a9b90048542",
+    "system_name": "TTN - 20B Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "c3c4a668-d2b9-4604-8cdb-ddda3c800258",
+    "system_name": "AOP Makwa Centre",
+    "status": "success",
+    "coordinates": [
+      45.573652,
+      -77.3595824
+    ],
+    "error": null
+  },
+  {
+    "system_id": "9f6856c0-e232-4605-83ce-a62c0112cb56",
+    "system_name": "BFN Administration Building",
+    "status": "success",
+    "coordinates": [
+      44.8316783,
+      -80.203564
+    ],
+    "error": null
+  },
+  {
+    "system_id": "e3499996-da13-4e1d-ab57-ddf4512908d1",
+    "system_name": "TTN - 26 Newpost",
+    "status": "success",
+    "coordinates": [
+      49.00644610000001,
+      -80.8339002
+    ],
+    "error": null
+  },
+  {
+    "system_id": "ab8b26fe-1342-4fe8-93e6-b5232559120b",
+    "system_name": "Oneida Community Centre",
+    "status": "success",
+    "coordinates": [
+      42.808159,
+      -81.364755
+    ],
+    "error": null
+  },
+  {
+    "system_id": "7649629e-c8e5-44b9-b90d-d8d2c0319c48",
+    "system_name": "TTN - Complex",
+    "status": "success",
+    "coordinates": [
+      49.0046224,
+      -80.8349682
+    ],
+    "error": null
+  },
+  {
+    "system_id": "d334a849-d7cf-4483-8ca0-cfd3704134b0",
+    "system_name": "COTTFN - 6",
+    "status": "success",
+    "coordinates": [
+      42.8142247,
+      -81.4635952
+    ],
+    "error": null
+  },
+  {
+    "system_id": "2b3c061d-6b8d-40cc-b4c5-9e0ca452bbe8",
+    "system_name": "TTN - 16 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "42c49e2d-89b7-4a51-b98a-63fdd260827a",
+    "system_name": "Oneida Family Healing Lodge",
+    "status": "success",
+    "coordinates": [
+      45.3416783,
+      -75.7175829
+    ],
+    "error": null
+  },
+  {
+    "system_id": "2d5e9230-58ca-49c5-97b9-a5370174bc58",
+    "system_name": "Stewart microFIT",
+    "status": "success",
+    "coordinates": [
+      45.17272910000001,
+      -75.9975702
+    ],
+    "error": null
+  },
+  {
+    "system_id": "3ba43568-2f32-4a18-ad89-a6330105bd7a",
+    "system_name": "BFN Elementary School",
+    "status": "success",
+    "coordinates": [
+      44.82236109999999,
+      -80.17117209999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "e51e7aa0-130e-4fa6-8616-2a6e530f7dc0",
+    "system_name": "TTN - 21 Newpost",
+    "status": "success",
+    "coordinates": [
+      49.0049106,
+      -80.8334155
+    ],
+    "error": null
+  },
+  {
+    "system_id": "d25e2e37-600b-458c-a6a5-2be3cd388e3c",
+    "system_name": "TTN - 18 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "80ced5e9-7ceb-4dc4-a9bd-a5a001557dbe",
+    "system_name": "Romiluxe 1",
+    "status": "success",
+    "coordinates": [
+      45.6351553,
+      -74.86342069999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "ff7b4c42-d1eb-46b0-b671-a6330108e06f",
+    "system_name": "BFN Water Treatment Plant",
+    "status": "success",
+    "coordinates": [
+      44.8316783,
+      -80.203564
+    ],
+    "error": null
+  },
+  {
+    "system_id": "d265607f-8d18-4aa1-a37d-d03c4acc7088",
+    "system_name": "TTN - 20A Newpost",
+    "status": "success",
+    "coordinates": [
+      49.005031,
+      -80.8343773
+    ],
+    "error": null
+  },
+  {
+    "system_id": "8114cf06-5f51-4886-b145-a316018214b0",
+    "system_name": "Isbrandt",
+    "status": "success",
+    "coordinates": [
+      45.3673391,
+      -75.770826
+    ],
+    "error": null
+  },
+  {
+    "system_id": "52db21b9-7064-4716-9333-ff18ce003f98",
+    "system_name": "TTN - Healthy Babies (Taykwata 3)",
+    "status": "success",
+    "coordinates": [
+      49.0609217,
+      -81.0163815
+    ],
+    "error": null
+  },
+  {
+    "system_id": "301ffc45-5e89-40dd-92ed-e790f62943c5",
+    "system_name": "Sheshegwaning Health Centre",
+    "status": "success",
+    "coordinates": [
+      45.933391,
+      -82.83702079999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "ec25878c-70a8-404c-b401-a62c0115934a",
+    "system_name": "BFN Rec Centre",
+    "status": "success",
+    "coordinates": [
+      44.8316783,
+      -80.203564
+    ],
+    "error": null
+  },
+  {
+    "system_id": "83888e82-d3ec-4ea9-9c23-9a515c3c2e33",
+    "system_name": "KFN - Peter Spence",
+    "status": "success",
+    "coordinates": [
+      52.2923774,
+      -81.6363848
+    ],
+    "error": null
+  },
+  {
+    "system_id": "13734d2b-aee7-4520-a250-217d8839abeb",
+    "system_name": "TTN - 1C Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "760daf04-43c5-45cf-ac44-0726bc97f108",
+    "system_name": "OakWood Solar - Headquarters",
+    "status": "success",
+    "coordinates": [
+      45.4931516,
+      -75.4835994
+    ],
+    "error": null
+  },
+  {
+    "system_id": "5340003a-cd23-4929-9df3-16d14d4a67a2",
+    "system_name": "TTN - 5 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.0652032,
+      -81.026554
+    ],
+    "error": null
+  },
+  {
+    "system_id": "1a930c38-6f18-437a-bbd0-a4ba015f659e",
+    "system_name": "SS Kyle Solar",
+    "status": "success",
+    "coordinates": [
+      45.1349187,
+      -74.5267424
+    ],
+    "error": null
+  },
+  {
+    "system_id": "f2fce401-7315-42d9-956b-a62c0116fef0",
+    "system_name": "BFN Health Care",
+    "status": "success",
+    "coordinates": [
+      44.8316783,
+      -80.203564
+    ],
+    "error": null
+  },
+  {
+    "system_id": "67de1557-9692-4612-be6a-1240032f1708",
+    "system_name": "AOP - Consult",
+    "status": "success",
+    "coordinates": [
+      45.5745358,
+      -77.2389476
+    ],
+    "error": null
+  },
+  {
+    "system_id": "f6faaf01-4386-40d2-b9c6-a633010a290d",
+    "system_name": "BFN Seniors Complex",
+    "status": "success",
+    "coordinates": [
+      44.8213427,
+      -80.1738316
+    ],
+    "error": null
+  },
+  {
+    "system_id": "f4cf303f-c143-4d73-94bd-1a3f2332f92c",
+    "system_name": "KFN - Leah",
+    "status": "success",
+    "coordinates": [
+      52.2871043,
+      -81.6480853
+    ],
+    "error": null
+  },
+  {
+    "system_id": "a36c8e45-66b4-4391-ad71-b6a11bb776d9",
+    "system_name": "TTN - 27A Newpost",
+    "status": "success",
+    "coordinates": [
+      49.005764,
+      -80.8331565
+    ],
+    "error": null
+  },
+  {
+    "system_id": "d4016dca-c422-4270-aeac-13eb9e9171ba",
+    "system_name": "TTN - Water Plant",
+    "status": "success",
+    "coordinates": [
+      49.0045818,
+      -80.8349267
+    ],
+    "error": null
+  },
+  {
+    "system_id": "531b427b-1b7b-48a9-8472-b7d1e8961e4d",
+    "system_name": "TTN - 29B Newpost",
+    "status": "success",
+    "coordinates": [
+      49.0059779,
+      -80.8332058
+    ],
+    "error": null
+  },
+  {
+    "system_id": "9cc0692c-de90-463c-ade9-a51e01436d5e",
+    "system_name": "Saikaly microFIT",
+    "status": "success",
+    "coordinates": [
+      45.3156744,
+      -75.61385369999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "1b29b16e-bc6c-435b-b48c-aafa0409d40e",
+    "system_name": "Pikangikum - Training Centre",
+    "status": "success",
+    "coordinates": [
+      51.8041895,
+      -93.98802549999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "745b7f5e-25ba-4471-bd2b-1677e5b68a58",
+    "system_name": "TTN - 25 Newpost",
+    "status": "success",
+    "coordinates": [
+      49.0057638,
+      -80.8331382
+    ],
+    "error": null
+  },
+  {
+    "system_id": "d662f9c7-00f6-4025-958a-3814beae2ca1",
+    "system_name": "TTN - 9 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.0819649,
+      -81.0025879
+    ],
+    "error": null
+  },
+  {
+    "system_id": "445e3f83-c7ca-4f52-8a10-50a1004c1429",
+    "system_name": "TTN - 17 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "7f97e9fe-c801-4752-bc1f-998178fbdd1d",
+    "system_name": "TTN - 23 Newpost",
+    "status": "success",
+    "coordinates": [
+      49.0048194,
+      -80.8334113
+    ],
+    "error": null
+  },
+  {
+    "system_id": "6103bad7-50e7-4a26-8a7d-2aa947634180",
+    "system_name": "TTN - 12 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "7c8f9480-5e3f-4ee4-bb6f-01663f8c3f15",
+    "system_name": "COTTFN -10",
+    "status": "success",
+    "coordinates": [
+      42.8142564,
+      -81.46355229999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "57604c9b-ee4e-4cb9-bcd2-a62c0111767c",
+    "system_name": "BFN Seniors Centre",
+    "status": "success",
+    "coordinates": [
+      44.8213427,
+      -80.1738316
+    ],
+    "error": null
+  },
+  {
+    "system_id": "a2b2b84f-7836-4020-9561-9d2347796266",
+    "system_name": "Pikangikum - Safe House",
+    "status": "success",
+    "coordinates": [
+      51.8041895,
+      -93.98802549999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "637fd647-d1c5-4e9e-a7af-9c9a3d6e02cd",
+    "system_name": "KFN - 16 Atiskst",
+    "status": "success",
+    "coordinates": [
+      52.2871043,
+      -81.6480853
+    ],
+    "error": null
+  },
+  {
+    "system_id": "5f896021-2518-4649-be1f-659cd08502e1",
+    "system_name": "TTN - 15 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "fd06eb55-c3ef-4381-b955-671d1d18e6fa",
+    "system_name": "TTN - 1A Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "9f28d534-1968-4e13-a99b-df5ec5020d23",
+    "system_name": "Sheshegwaning Band Office",
+    "status": "success",
+    "coordinates": [
+      45.933391,
+      -82.83702079999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "9e5c4fe1-9930-49c1-a931-a6972357e5e6",
+    "system_name": "TTN - 6 Taykwata",
+    "status": "success",
+    "coordinates": [
+      46.97518909999999,
+      -80.0580174
+    ],
+    "error": null
+  },
+  {
+    "system_id": "e5e6bfff-99c8-4312-b70b-015caf433d95",
+    "system_name": "Al-Araji",
+    "status": "success",
+    "coordinates": [
+      45.3416783,
+      -75.7175829
+    ],
+    "error": null
+  },
+  {
+    "system_id": "dc546022-bd39-474a-904a-322596b02ba4",
+    "system_name": "TTN - 11 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.0146084,
+      -81.0305034
+    ],
+    "error": null
+  },
+  {
+    "system_id": "ad2881f3-2705-4d37-832a-d2260919c701",
+    "system_name": "TTN - 14 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "e6731c81-273e-4a02-94b4-a62c01141b93",
+    "system_name": "BFN Day Care",
+    "status": "success",
+    "coordinates": [
+      44.8316783,
+      -80.203564
+    ],
+    "error": null
+  },
+  {
+    "system_id": "204291b9-960a-4816-ac8e-91a40d2300e6",
+    "system_name": "TTN - 4 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "2617c3b5-bc53-4e3a-81b6-d97cdfc7ee25",
+    "system_name": "TTN - Garage",
+    "status": "success",
+    "coordinates": [
+      49.0045818,
+      -80.8349267
+    ],
+    "error": null
+  },
+  {
+    "system_id": "bf915090-5f59-4128-a206-46c73f2f779d",
+    "system_name": "JAZZ MIIGWETCH I",
+    "status": "success",
+    "coordinates": [
+      45.2760743,
+      -75.9253014
+    ],
+    "error": null
+  },
+  {
+    "system_id": "80bef004-768b-43c0-8f48-d5adca56e8e3",
+    "system_name": "TTN - 20B Newpost",
+    "status": "success",
+    "coordinates": [
+      49.005031,
+      -80.8343773
+    ],
+    "error": null
+  },
+  {
+    "system_id": "f0196143-a48b-4d14-9a1b-613012ad821f",
+    "system_name": "Oneida New Family Healing Lodge",
+    "status": "success",
+    "coordinates": [
+      42.8230328,
+      -81.374984
+    ],
+    "error": null
+  },
+  {
+    "system_id": "3a4d8d45-6080-4200-a9d1-021ac2aeed97",
+    "system_name": "Mattagami - 82 White Pine",
+    "status": "success",
+    "coordinates": [
+      47.7986531,
+      -81.52711359999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "23b02b35-7a46-4ff3-9dec-9950fbc536f9",
+    "system_name": "TTN - 13 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "b6b9ea23-3b0b-4a9b-81e4-821cbb50191f",
+    "system_name": "TTN - 24 Newpost",
+    "status": "success",
+    "coordinates": [
+      49.0059708,
+      -80.8338716
+    ],
+    "error": null
+  },
+  {
+    "system_id": "d77cecff-4cc3-4d8b-a809-2345ebea1258",
+    "system_name": "Oneida Fire Station",
+    "status": "success",
+    "coordinates": [
+      42.808159,
+      -81.364755
+    ],
+    "error": null
+  },
+  {
+    "system_id": "78c32799-43a8-4080-b532-d89609899c12",
+    "system_name": "TTN - 20A Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "63e25f8a-4d82-4493-b866-9ef3867361e7",
+    "system_name": "TTN - 22 Newpost",
+    "status": "success",
+    "coordinates": [
+      49.0053905,
+      -80.8339256
+    ],
+    "error": null
+  },
+  {
+    "system_id": "edbe48ec-7740-40b7-8211-5b5a7f8beeac",
+    "system_name": "TTN - 28 Newpost",
+    "status": "success",
+    "coordinates": [
+      49.00665859999999,
+      -80.833906
+    ],
+    "error": null
+  },
+  {
+    "system_id": "f2fafda2-9b07-40e3-875f-db6409040b9c",
+    "system_name": "JAZZ MIIGWETCH X",
+    "status": "success",
+    "coordinates": [
+      45.3285081,
+      -75.3576142
+    ],
+    "error": null
+  },
+  {
+    "system_id": "9ec5a266-e56d-4e17-9c3e-3fd00698e823",
+    "system_name": "TTN - 29A Newpost",
+    "status": "success",
+    "coordinates": [
+      49.0059779,
+      -80.8332058
+    ],
+    "error": null
+  },
+  {
+    "system_id": "5b0409d2-976f-42ed-bfad-4fdd59a60c61",
+    "system_name": "COTTFN - 2 ",
+    "status": "success",
+    "coordinates": [
+      42.8142564,
+      -81.46355229999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "b8eb6fa1-0c10-48f3-ac12-59bb98526c3e",
+    "system_name": "TTN - 10 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.0733106,
+      -81.0151012
+    ],
+    "error": null
+  },
+  {
+    "system_id": "ce845214-95ac-41c0-af69-9bc9435cd73f",
+    "system_name": "TTN - 19 Newpost",
+    "status": "success",
+    "coordinates": [
+      49.0048194,
+      -80.8334113
+    ],
+    "error": null
+  },
+  {
+    "system_id": "803db360-2c45-46ce-8a63-8786f9f7329a",
+    "system_name": "TTN - 31 Newpost",
+    "status": "success",
+    "coordinates": [
+      49.0059773,
+      -80.8331343
+    ],
+    "error": null
+  },
+  {
+    "system_id": "cb65a81e-5284-4c79-ae3a-900e24bfa590",
+    "system_name": "KFN - Hannah Kash",
+    "status": "success",
+    "coordinates": [
+      52.2902628,
+      -81.6447919
+    ],
+    "error": null
+  },
+  {
+    "system_id": "f6a40818-7718-4fb7-b268-a4b901584469",
+    "system_name": "keewaywinschool",
+    "status": "success",
+    "coordinates": [
+      52.9481152,
+      -92.8176015
+    ],
+    "error": null
+  },
+  {
+    "system_id": "7677754f-9fb4-4ccd-a665-f9dd6d16ab36",
+    "system_name": "Mattagami - Arena",
+    "status": "success",
+    "coordinates": [
+      47.7986531,
+      -81.52711359999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "7c6702c5-5de3-4eba-93a5-d649f372f7fb",
+    "system_name": "TTN - 1B Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "fd1465b1-5345-42dd-9de9-a58b0137391a",
+    "system_name": "Romiluxe 2",
+    "status": "success",
+    "coordinates": [
+      45.3579046,
+      -75.00551709999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "62a92f95-72f6-4890-8545-4b7c92712d1f",
+    "system_name": "TTN - 8 Taykwata",
+    "status": "success",
+    "coordinates": [
+      49.06502589999999,
+      -81.02992979999999
+    ],
+    "error": null
+  },
+  {
+    "system_id": "e6eb1c9b-6d1b-4ac6-8374-a38f00f34406",
+    "system_name": "Bonnechere Manor",
+    "status": "success",
+    "coordinates": [
+      45.4834776,
+      -76.702759
+    ],
+    "error": null
+  },
+  {
+    "system_id": "4d4dac43-f39c-46c4-9efb-887aeb144db8",
+    "system_name": "TTN - 27B Newpost",
+    "status": "success",
+    "coordinates": [
+      49.005764,
+      -80.8331565
+    ],
+    "error": null
+  },
+  {
+    "system_id": "0b9fb731-e6f6-4a1d-b713-f69175791571",
+    "system_name": "TTN - Carport",
+    "status": "success",
+    "coordinates": [
+      49.0046224,
+      -80.8349682
+    ],
+    "error": null
+  },
+  {
+    "system_id": "afb654ec-30f7-4c35-8891-fc5b4ff6217d",
+    "system_name": "Oneida Day Care",
+    "status": "success",
+    "coordinates": [
+      42.808159,
+      -81.364755
+    ],
+    "error": null
+  }
+]

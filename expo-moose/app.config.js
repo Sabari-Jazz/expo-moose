@@ -8,6 +8,7 @@ require('dotenv').config();
 export default {
   expo: {
     // --- Basic App Info (Using values from app.config.js primarily) ---
+    
     name: "Moose Solar (Dev)",
     slug: "moose-solar",
     version: "2.0.0", // Consider using eas.json appVersionSource: remote
@@ -19,6 +20,7 @@ export default {
       runtimeVersion: {
         policy: "appVersion"
       },
+      owner: "sabarijazz",
     
     // --- Icon and Splash ---
     // !!! IMPORTANT: You MUST manually edit './assets/icon.png'
@@ -45,7 +47,7 @@ export default {
     // --- iOS Specific ---
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.moose.solar.dev",
+      bundleIdentifier: "com.sabarijazz.moose.solar.dev",
       buildNumber: "2.0.0", // Consider using eas build --auto-increment or remote app version source
       // Merged infoPlist entries from both files
       infoPlist: {
