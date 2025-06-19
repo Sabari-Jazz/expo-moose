@@ -98,10 +98,24 @@ class SourceDocument(BaseModel):
     content: str
     metadata: Optional[Dict[str, Any]] = None
 
+class ChartData(BaseModel):
+    """Chart data for visualization"""
+    chart_type: str = "line"  # "line", "bar", "pie"
+    data_type: str  # "energy_production", "co2_savings", "earnings"
+    title: str
+    x_axis_label: str
+    y_axis_label: str
+    data_points: List[Dict[str, Any]]  # [{"x": "2023-01", "y": 1500}, ...]
+    time_period: str  # "daily", "monthly", "yearly", "weekly"
+    total_value: Optional[float] = None
+    unit: str  # "kWh", "kg CO2", "$"
+    system_name: Optional[str] = None
+
 class ChatResponse(BaseModel):
     """Response from the chatbot"""
     response: str
     source_documents: Optional[List[SourceDocument]] = None
+    chart_data: Optional[ChartData] = None
 
 # Add function schema models
 class SearchVectorDBParams(BaseModel):
@@ -635,126 +649,518 @@ def get_co2_savings(system_id: str, start_date: str = None, end_date: str = None
         return {"error": f"Failed to fetch CO2 savings data: {str(e)}"}
 
 def get_flow_data(system_id: str, jwt_token: str = None) -> Dict[str, Any]:
-    """
-    Gets the realtime power flow data for a specific solar system from the Solar.web API.
-    
-    Args:
-        system_id: The ID of the system to get data for
-        jwt_token: JWT token for API authentication
-        
-    Returns:
-        A dictionary with flow data including system status and power information
-    """
-    
-    print(f"Fetching flow data for system {system_id}")
-    
-    # Validate system_id
-    if not system_id:
-        return {
-            "error": "No system ID provided. Please select a system before querying flow data.",
-            "system_id_required": True
-        }
-    
-    # Base URL for the Solar.web API
-    base_url = f"https://api.solarweb.com/swqapi/pvsystems/{system_id}/flowdata"
-    
-    # Set up headers for API call
-    headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'AccessKeyId': os.getenv('SOLAR_WEB_ACCESS_KEY_ID'),
-        'AccessKeyValue': os.getenv('SOLAR_WEB_ACCESS_KEY_VALUE'),
-        'Authorization': f'Bearer {jwt_token}' if jwt_token else 'Bearer eyJ4NXQiOiJOalpoT0dJMVpqQXpaVGt5TlRVNU1UbG1NVFkzWVRGbU9UWmpObVE0TURnME1HTmlZbU5sWkEiLCJraWQiOiJORFk0TVdaalpqWmhZakpsT1RRek5UTTVObUUwTkRWa016TXpOak16TmpBd1ptUmlNRFZsT1dRMVpHWmxPVEU1TWpSaU1XVXhZek01TURObU1ESXdaUV9SUzI1NiIsImFsZyI6IlJTMjU2In0.eyJhdF9oYXNoIjoiNUt6S0p1N1Q3RXk1VlZ6QWJQTE14dyIsImF1ZCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJzdWIiOiJtb25pdG9yaW5nQGphenpzb2xhci5jb20iLCJuYmYiOjE3NDczMTQyNTMsImF6cCI6ImMyZ0hwTXpRVUhmQ2ZsV3hIX3dFMkFlZzA5TWEgICAiLCJhbXIiOlsicGFzc3dvcmQiXSwiaXNzIjoiaHR0cHM6XC9cL2xvZ2luLmZyb25pdXMuY29tXC9vYXV0aDJcL29pZGNkaXNjb3ZlcnkiLCJleHAiOjE3NDczMTc4NTMsImNvbnRhY3RfaWQiOiI2OGRmODA0My03OTI0LWUzMTEtOTc4ZS0wMDUwNTZhMjAwMDMiLCJpYXQiOjE3NDczMTQyNTN9.g9yitwr_6sHLOCRI2TAH7OZ_ibyQznkGmg3oEsdcySag5NYnimo5SY0OXIgTwNhoDkBsvA9BD-EWTN93ED7P1zR4RtUTo3iTJGaH5rTzdk33Tbk0dLGCrKhSj82kpkcLcMrmVtX37_9Kly37Jq1TuYZTOv63skz77uDNfjbHLEhSPyQueQlRtIsdU5z32OMx_0SJmP8V9llpm2T40Farr2OUNj_YczX98oC9xIO2aUBGSRPPYQFE5PQxAoNjl478-QeSoo2qNaHYlwlqBmJXOdukA1Kz6GBWKn2KNfp5r8r6x3UQGS_vys54ruwom-ZQbip7AAELesQdqNXiVEvZyg'
-    }
-    
+    """Get real-time flow data for a specific system"""
     try:
-        # Make the API call with GET
-        print(f"Calling Solar.web API for flow data: {base_url}")
-        response = requests.get(
-            base_url, 
-            headers=headers
+        # Validate system_id
+        if not system_id:
+            return {"error": "System ID is required"}
+        
+        # Get flow data from DynamoDB
+        response = table.get_item(
+            Key={
+                'PK': f'System#{system_id}',
+                'SK': 'FLOW'
+            }
         )
         
-        # Check if the request was successful
-        if response.status_code == 200:
-            data = response.json()
-            print(f"API call successful, received flow data: {data}")
-            return data
-        else:
-            print(f"API call failed with status code {response.status_code}: {response.text}")
-            
-            # Fall back to mock data if the API call fails
-            print("Using mock flow data as fallback")
-            mock_data = {
-                "pvSystemId": system_id,
-                "status": {
-                    "isOnline": True,
-                    "battMode": "1.0"
-                },
-                "data": {
-                    "logDateTime": datetime.now().isoformat(),
-                    "channels": [
-                        {
-                            "channelName": "PowerFeedIn",
-                            "channelType": "Power",
-                            "unit": "W",
-                            "value": -496.01
-                        },
-                        {
-                            "channelName": "PowerLoad",
-                            "channelType": "Power",
-                            "unit": "W",
-                            "value": -186.89
-                        },
-                        {
-                            "channelName": "PowerBattCharge",
-                            "channelType": "Power",
-                            "unit": "W",
-                            "value": 0
-                        },
-                        {
-                            "channelName": "PowerPV",
-                            "channelType": "Power",
-                            "unit": "W",
-                            "value": 1682.9
-                        },
-                        {
-                            "channelName": "PowerOhmpilot",
-                            "channelType": "Power",
-                            "unit": "W",
-                            "value": None
-                        },
-                        {
-                            "channelName": "BattSOC",
-                            "channelType": "Percent",
-                            "unit": "%",
-                            "value": 99
-                        },
-                        {
-                            "channelName": "RateSelfSufficiency",
-                            "channelType": "Percent",
-                            "unit": "%",
-                            "value": 100
-                        },
-                        {
-                            "channelName": "RateSelfConsumption",
-                            "channelType": "Percent",
-                            "unit": "%",
-                            "value": 64.58
-                        },
-                        {
-                            "channelName": "PowerEVCTotal",
-                            "channelType": "Power",
-                            "unit": "W",
-                            "value": -1000.0
-                        }
-                    ]
-                }
-            }
-            return mock_data
+        if 'Item' not in response:
+            return {"error": f"No flow data found for system {system_id}"}
+        
+        item = response['Item']
+        
+        # Check if system is online based on last update timestamp
+        last_updated = item.get('timestamp')
+        is_online = False
+        
+        if last_updated:
+            try:
+                # Parse the timestamp and check if it's recent (within last 10 minutes)
+                from datetime import datetime, timezone
+                last_update_time = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
+                current_time = datetime.now(timezone.utc)
+                time_diff = (current_time - last_update_time).total_seconds()
+                is_online = time_diff < 600  # 10 minutes
+            except:
+                is_online = False
+        
+        # Extract power data
+        channels = item.get('channels', {})
+        power_pv = 0
+        
+        # Look for PowerPV channel
+        for channel_id, channel_data in channels.items():
+            if isinstance(channel_data, dict) and channel_data.get('channelType') == 'PowerPV':
+                power_pv = channel_data.get('value', 0)
+                break
+        
+        return {
+            "system_id": system_id,
+            "isOnline": is_online,
+            "lastUpdated": last_updated,
+            "powerPV": power_pv,
+            "channels": channels
+        }
+        
     except Exception as e:
-        print(f"Error fetching flow data: {e}")
-        return {"error": f"Failed to fetch flow data: {str(e)}"}
+        print(f"Error getting flow data for system {system_id}: {str(e)}")
+        return {"error": f"Failed to get flow data: {str(e)}"}
+
+def determine_api_date_format(time_period: str, start_date: str, end_date: str) -> tuple:
+    """
+    Determine the appropriate API date format based on the requested time_period.
+    
+    Smart Granularity Logic:
+    - yearly: Request monthly data points (YYYY-MM format)
+    - monthly: Request daily data points (YYYY-MM-DD format) 
+    - weekly: Request daily data points (YYYY-MM-DD format)
+    - daily: Request daily data points (YYYY-MM-DD format)
+    
+    Args:
+        time_period: "yearly", "monthly", "weekly", "daily"
+        start_date: Original start date from user request
+        end_date: Original end date from user request
+        
+    Returns:
+        Tuple of (api_start_date, api_end_date) in appropriate format
+    """
+    logger.info(f"=== DETERMINE_API_DATE_FORMAT ===")
+    logger.info(f"Input - time_period: {time_period}, start_date: {start_date}, end_date: {end_date}")
+    
+    try:
+        if time_period == "yearly":
+            # For yearly charts, request monthly data points
+            # Convert dates to YYYY-MM format to get monthly aggregations
+            if len(start_date) == 4:  # YYYY
+                api_start_date = f"{start_date}-01"  # January of that year
+                api_end_date = f"{start_date}-12"    # December of that year
+            elif len(start_date) == 7:  # YYYY-MM
+                api_start_date = start_date
+                api_end_date = end_date if end_date else start_date
+            elif len(start_date) == 10:  # YYYY-MM-DD
+                # Extract year and get full year range
+                year = start_date[:4]
+                api_start_date = f"{year}-01"
+                api_end_date = f"{year}-12"
+            else:
+                api_start_date = start_date
+                api_end_date = end_date
+                
+        elif time_period in ["monthly", "weekly", "daily"]:
+            # For monthly/weekly/daily charts, request daily data points
+            # Convert dates to YYYY-MM-DD format to get daily granularity
+            if len(start_date) == 4:  # YYYY
+                api_start_date = f"{start_date}-01-01"  # January 1st of that year
+                api_end_date = f"{start_date}-12-31"    # December 31st of that year
+            elif len(start_date) == 7:  # YYYY-MM
+                # Get all days in that month
+                year, month = start_date.split('-')
+                api_start_date = f"{start_date}-01"  # First day of month
+                # Calculate last day of month
+                if month in ['01', '03', '05', '07', '08', '10', '12']:
+                    last_day = '31'
+                elif month in ['04', '06', '09', '11']:
+                    last_day = '30'
+                else:  # February
+                    # Simple leap year check
+                    year_int = int(year)
+                    if year_int % 4 == 0 and (year_int % 100 != 0 or year_int % 400 == 0):
+                        last_day = '29'
+                    else:
+                        last_day = '28'
+                api_end_date = f"{start_date}-{last_day}"
+            elif len(start_date) == 10:  # YYYY-MM-DD
+                api_start_date = start_date
+                api_end_date = end_date if end_date else start_date
+            else:
+                api_start_date = start_date
+                api_end_date = end_date
+        else:
+            # Fallback - use original dates
+            api_start_date = start_date
+            api_end_date = end_date
+            
+    except Exception as e:
+        logger.error(f"Error in determine_api_date_format: {str(e)}")
+        # Fallback to original dates
+        api_start_date = start_date
+        api_end_date = end_date
+    
+    logger.info(f"Output - api_start_date: {api_start_date}, api_end_date: {api_end_date}")
+    return api_start_date, api_end_date
+
+
+def aggregate_data_points(raw_data_points: list, time_period: str, data_type: str) -> list:
+    """
+    Aggregate and format data points based on the requested time_period.
+    
+    Args:
+        raw_data_points: List of data points from API
+        time_period: "yearly", "monthly", "weekly", "daily"
+        data_type: "energy_production", "co2_savings", "earnings"
+        
+    Returns:
+        List of formatted chart data points with appropriate aggregation
+    """
+    logger.info(f"=== AGGREGATE_DATA_POINTS ===")
+    logger.info(f"Input - {len(raw_data_points)} raw points, time_period: {time_period}, data_type: {data_type}")
+    
+    if not raw_data_points:
+        logger.warning("No raw data points to aggregate")
+        return []
+        
+    chart_data_points = []
+    
+    try:
+        if time_period == "yearly":
+            # For yearly view, group by month and show monthly totals
+            monthly_totals = {}
+            
+            for data_point in raw_data_points:
+                date_str = data_point.get('date', '')
+                value = get_data_point_value(data_point, data_type)
+                
+                # Extract year-month from date
+                if len(date_str) >= 7:  # YYYY-MM or YYYY-MM-DD
+                    year_month = date_str[:7]  # YYYY-MM
+                    if year_month not in monthly_totals:
+                        monthly_totals[year_month] = 0
+                    monthly_totals[year_month] += value
+            
+            # Convert monthly totals to chart points
+            for year_month in sorted(monthly_totals.keys()):
+                try:
+                    date_obj = datetime.strptime(year_month, "%Y-%m")
+                    x_label = date_obj.strftime("%b")  # "Jan", "Mar", "May" (without year)
+                    chart_data_points.append({
+                        "x": x_label,
+                        "y": round(monthly_totals[year_month], 2)
+                    })
+                except ValueError:
+                    # Fallback if date parsing fails
+                    chart_data_points.append({
+                        "x": year_month,
+                        "y": round(monthly_totals[year_month], 2)
+                    })
+                    
+        elif time_period == "monthly":
+            # For monthly view, show data grouped by 3-day periods (max ~10 points instead of ~30)
+            three_day_totals = {}
+            
+            for data_point in raw_data_points:
+                date_str = data_point.get('date', '')
+                value = get_data_point_value(data_point, data_type)
+                
+                # Group by 3-day periods
+                try:
+                    if len(date_str) >= 10:  # YYYY-MM-DD
+                        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                        # Group into 3-day periods: 1-3, 4-6, 7-9, 10-12, etc.
+                        day_of_month = date_obj.day
+                        period_start = ((day_of_month - 1) // 3) * 3 + 1
+                        period_end = min(period_start + 2, 31)  # Don't exceed month end
+                        
+                        # Create period key like "01-03", "04-06", etc.
+                        period_key = f"{period_start:02d}-{period_end:02d}"
+                        
+                        if period_key not in three_day_totals:
+                            three_day_totals[period_key] = 0
+                        three_day_totals[period_key] += value
+                    else:
+                        # Fallback for non-standard date format
+                        if date_str not in three_day_totals:
+                            three_day_totals[date_str] = 0
+                        three_day_totals[date_str] += value
+                        
+                except ValueError:
+                    # Fallback for date parsing errors
+                    if date_str not in three_day_totals:
+                        three_day_totals[date_str] = 0
+                    three_day_totals[date_str] += value
+            
+            # Convert 3-day totals to chart points
+            for period_key in sorted(three_day_totals.keys()):
+                chart_data_points.append({
+                    "x": period_key,
+                    "y": round(three_day_totals[period_key], 2)
+                })
+                
+        elif time_period == "weekly":
+            # For weekly view, show daily values with day names
+            for data_point in raw_data_points:
+                date_str = data_point.get('date', '')
+                value = get_data_point_value(data_point, data_type)
+                
+                # Format as day of week
+                try:
+                    if len(date_str) >= 10:  # YYYY-MM-DD
+                        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                        x_label = date_obj.strftime("%a")  # "Mon", "Tue", etc.
+                    else:
+                        x_label = date_str
+                except ValueError:
+                    x_label = date_str
+                    
+                chart_data_points.append({
+                    "x": x_label,
+                    "y": round(value, 2)
+                })
+                
+        else:  # daily
+            # For daily view, show daily values
+            for data_point in raw_data_points:
+                date_str = data_point.get('date', '')
+                value = get_data_point_value(data_point, data_type)
+                
+                # Format as MM/DD
+                try:
+                    if len(date_str) >= 10:  # YYYY-MM-DD
+                        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                        x_label = date_obj.strftime("%m/%d")
+                    else:
+                        x_label = date_str
+                except ValueError:
+                    x_label = date_str
+                    
+                chart_data_points.append({
+                    "x": x_label,
+                    "y": round(value, 2)
+                })
+        
+        # Log first few entries for debugging
+        for i, point in enumerate(chart_data_points[:5]):
+            logger.info(f"  Chart point {i+1}: {point['x']} = {point['y']}")
+            
+    except Exception as e:
+        logger.error(f"Error in aggregate_data_points: {str(e)}")
+        # Fallback - return raw data with basic formatting
+        for data_point in raw_data_points:
+            date_str = data_point.get('date', '')
+            value = get_data_point_value(data_point, data_type)
+            chart_data_points.append({
+                "x": date_str,
+                "y": round(value, 2)
+            })
+    
+    logger.info(f"Output - {len(chart_data_points)} aggregated chart points")
+    return chart_data_points
+
+
+def get_data_point_value(data_point: dict, data_type: str) -> float:
+    """
+    Extract the appropriate value from a data point based on data_type.
+    
+    Args:
+        data_point: Individual data point from API
+        data_type: "energy_production", "co2_savings", "earnings"
+        
+    Returns:
+        Float value for the chart
+    """
+    if data_type == "energy_production":
+        value = float(data_point.get('energy_kwh', 0))
+    elif data_type == "earnings":
+        value = float(data_point.get('energy_kwh', 0)) * 0.40  # Convert to earnings
+    elif data_type == "co2_savings":
+        value = float(data_point.get('co2_kg', 0))
+    else:
+        # Fallback
+        value = float(data_point.get('energy_kwh', 0))
+    
+    return value
+
+
+def generate_chart_data(
+    data_type: str,
+    system_id: str,
+    time_period: str,
+    start_date: str,
+    end_date: str = None,
+    jwt_token: str = None
+) -> Dict[str, Any]:
+    """
+    Generate chart data for visualization based on user request.
+    
+    Args:
+        data_type: "energy_production", "co2_savings", "earnings"
+        system_id: The solar system ID
+        time_period: "yearly", "monthly", "weekly", "daily"
+        start_date: Start date in appropriate format
+        end_date: End date (optional, defaults to start_date)
+        jwt_token: JWT token for authentication
+    
+    Returns:
+        ChartData formatted for frontend visualization
+    """
+    logger.info(f"=== GENERATE_CHART_DATA START ===")
+    logger.info(f"Parameters received:")
+    logger.info(f"  - data_type: {data_type}")
+    logger.info(f"  - system_id: {system_id}")
+    logger.info(f"  - time_period: {time_period}")
+    logger.info(f"  - start_date: {start_date}")
+    logger.info(f"  - end_date: {end_date}")
+    logger.info(f"  - jwt_token: {'[PROVIDED]' if jwt_token else '[NOT PROVIDED]'}")
+    
+    try:
+        if not end_date:
+            end_date = start_date
+            logger.info(f"No end_date provided, using start_date: {end_date}")
+            
+        # SMART GRANULARITY LOGIC - Determine API date format based on requested time_period
+        api_start_date, api_end_date = determine_api_date_format(time_period, start_date, end_date)
+        logger.info(f"Smart granularity - API dates: {api_start_date} to {api_end_date}")
+            
+        # Get system profile for name
+        system_name = "Solar System"
+        try:
+            logger.info(f"Fetching system profile for system_id: {system_id}")
+            profile_response = table.get_item(
+                Key={'PK': f'System#{system_id}', 'SK': 'PROFILE'}
+            )
+            if 'Item' in profile_response:
+                system_name = profile_response['Item'].get('name', f"System {system_id}")
+                logger.info(f"System profile found - name: {system_name}")
+            else:
+                logger.warning(f"No system profile found for system_id: {system_id}")
+        except Exception as e:
+            logger.error(f"Error fetching system profile: {str(e)}")
+        
+        # Determine data granularity and fetch method
+        chart_data_points = []
+        total_value = 0
+        unit = ""
+        
+        logger.info(f"Processing data_type: {data_type}")
+        
+        if data_type in ["energy_production", "earnings"]:
+            logger.info(f"Fetching energy production data with smart granularity...")
+            # Get energy production data with appropriate granularity
+            energy_data = get_energy_production(system_id, api_start_date, api_end_date, jwt_token)
+            
+            logger.info(f"Energy data response keys: {list(energy_data.keys()) if isinstance(energy_data, dict) else 'Not a dict'}")
+            
+            if "error" in energy_data:
+                logger.error(f"Error in energy data: {energy_data['error']}")
+                return {"error": energy_data["error"]}
+            
+            logger.info(f"Processing chart data for time_period: {time_period}")
+            
+            # Process data points based on time period with smart aggregation
+            raw_data_points = energy_data.get('data_points', [])
+            logger.info(f"Found {len(raw_data_points)} raw data points")
+            
+            # Apply smart aggregation based on time_period
+            chart_data_points = aggregate_data_points(raw_data_points, time_period, data_type)
+            logger.info(f"After smart aggregation: {len(chart_data_points)} chart data points")
+            
+            total_value = float(energy_data.get('total_energy_kwh', 0))
+            if data_type == "earnings":
+                total_value = total_value * 0.40
+                unit = "$"
+                logger.info(f"Calculated earnings total_value: {total_value}")
+            else:
+                unit = "kWh"
+                logger.info(f"Energy production total_value: {total_value}")
+                
+        elif data_type == "co2_savings":
+            logger.info(f"Fetching CO2 savings data with smart granularity...")
+            # Get CO2 savings data with appropriate granularity
+            co2_data = get_co2_savings(system_id, api_start_date, api_end_date, jwt_token)
+            
+            logger.info(f"CO2 data response keys: {list(co2_data.keys()) if isinstance(co2_data, dict) else 'Not a dict'}")
+            
+            if "error" in co2_data:
+                logger.error(f"Error in CO2 data: {co2_data['error']}")
+                return {"error": co2_data["error"]}
+            
+            logger.info(f"Processing CO2 chart data for time_period: {time_period}")
+            
+            # Process CO2 data points with smart aggregation
+            raw_data_points = co2_data.get('data_points', [])
+            logger.info(f"Found {len(raw_data_points)} CO2 raw data points")
+            
+            # Apply smart aggregation based on time_period
+            chart_data_points = aggregate_data_points(raw_data_points, time_period, data_type)
+            logger.info(f"After smart aggregation: {len(chart_data_points)} CO2 chart data points")
+            
+            total_value = float(co2_data.get('total_co2_kg', 0))
+            unit = "kg CO2"
+            logger.info(f"CO2 savings total_value: {total_value}")
+        
+        # Generate appropriate title
+        # Detect date format and parse accordingly
+        try:
+            if len(start_date) == 4:  # YYYY format
+                period_text = f"Year {start_date}"
+            elif len(start_date) == 7:  # YYYY-MM format
+                period_text = datetime.strptime(start_date, "%Y-%m").strftime("%B %Y")
+            elif len(start_date) == 10:  # YYYY-MM-DD format
+                if time_period == "daily":
+                    period_text = datetime.strptime(start_date, "%Y-%m-%d").strftime("%B %d, %Y")
+                elif time_period == "weekly":
+                    period_text = f"Week of {datetime.strptime(start_date, '%Y-%m-%d').strftime('%B %d, %Y')}"
+                else:
+                    # For monthly/yearly periods with daily dates, show the range
+                    if end_date and end_date != start_date:
+                        start_formatted = datetime.strptime(start_date, "%Y-%m-%d").strftime("%B %d")
+                        end_formatted = datetime.strptime(end_date, "%Y-%m-%d").strftime("%B %d, %Y")
+                        period_text = f"{start_formatted} - {end_formatted}"
+                    else:
+                        period_text = datetime.strptime(start_date, "%Y-%m-%d").strftime("%B %d, %Y")
+            else:
+                # Fallback to original start_date if format is unexpected
+                period_text = start_date
+        except ValueError as e:
+            logger.warning(f"Date parsing failed for start_date '{start_date}': {e}")
+            period_text = start_date  # Fallback to raw date string
+        
+        data_type_text = {
+            "energy_production": "Energy Production",
+            "co2_savings": "CO2 Savings",
+            "earnings": "Earnings"
+        }.get(data_type, data_type)
+        
+        title = f"{data_type_text} - {period_text}"
+        
+        logger.info(f"Generated chart title: {title}")
+        logger.info(f"Chart data points count: {len(chart_data_points)}")
+        
+        # Create chart data
+        chart_data = {
+            "chart_type": "line",
+            "data_type": data_type,
+            "title": title,
+            "x_axis_label": "Time Period",
+            "y_axis_label": f"{data_type_text} ({unit})",
+            "data_points": chart_data_points,
+            "time_period": time_period,
+            "total_value": round(total_value, 2),
+            "unit": unit,
+            "system_name": system_name
+        }
+        
+        logger.info(f"Final chart_data structure:")
+        logger.info(f"  - chart_type: {chart_data['chart_type']}")
+        logger.info(f"  - data_type: {chart_data['data_type']}")
+        logger.info(f"  - title: {chart_data['title']}")
+        logger.info(f"  - data_points count: {len(chart_data['data_points'])}")
+        logger.info(f"  - total_value: {chart_data['total_value']}")
+        logger.info(f"  - unit: {chart_data['unit']}")
+        logger.info(f"  - system_name: {chart_data['system_name']}")
+        
+        if len(chart_data_points) > 0:
+            logger.info(f"Sample data points (first 3):")
+            for i, point in enumerate(chart_data_points[:3]):
+                logger.info(f"  Point {i+1}: x='{point['x']}', y={point['y']}")
+        
+        logger.info(f"=== GENERATE_CHART_DATA SUCCESS ===")
+        return chart_data
+        
+    except Exception as e:
+        logger.error(f"=== GENERATE_CHART_DATA ERROR ===")
+        logger.error(f"Error generating chart data: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return {"error": f"Failed to generate chart data: {str(e)}"}
 
 def search_vector_db(query: str, limit: int = 100) -> List[Dict[str, Any]]:
     """
@@ -945,6 +1351,55 @@ FUNCTION_SPECS =  [
                     "required": ["system_id"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "generate_chart_data",
+                "description": (
+                    "Generate chart data for visualization when user asks to 'show', 'display', 'graph', 'chart', or 'visualize' data. "
+                    "Use this for requests like:\n"
+                    "- 'Show me production for 2023'\n"
+                    "- 'Display my CO2 savings this year'\n"
+                    "- 'Chart my earnings last month'\n"
+                    "- 'Graph weekly production data'\n\n"
+                    "Smart time period handling:\n"
+                    "- 'show yearly data' → get monthly data points for that year\n"
+                    "- 'show monthly data' → get daily data points for that month\n"
+                    "- 'show weekly data' → get daily data points for that week\n"
+                    "- 'show daily data' → get hourly data points for that day\n\n"
+                    "Always convert relative terms to actual dates before calling."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "data_type": {
+                            "type": "string",
+                            "enum": ["energy_production", "co2_savings", "earnings"],
+                            "description": "Type of data to chart: energy_production, co2_savings, or earnings"
+                        },
+                        "system_id": {
+                            "type": "string",
+                            "description": "The ID of the system to get data for"
+                        },
+                        "time_period": {
+                            "type": "string",
+                            "enum": ["yearly", "monthly", "weekly", "daily"],
+                            "description": "Time period granularity for the chart"
+                        },
+                        "start_date": {
+                            "type": "string",
+                            "description": "Start date in YYYY, YYYY-MM, or YYYY-MM-DD format. Must convert relative terms to actual dates."
+                        },
+                        "end_date": {
+                            "type": "string",
+                            "description": "End date in same format as start_date. Optional, defaults to start_date.",
+                            "default": ""
+                        }
+                    },
+                    "required": ["data_type", "system_id", "time_period", "start_date"]
+                }
+            }
         }
     ]
 
@@ -953,7 +1408,8 @@ FUNCTION_MAP = {
     "search_vector_db": search_vector_db,
     "get_energy_production": get_energy_production,
     "get_co2_savings": get_co2_savings,
-    "get_flow_data": get_flow_data
+    "get_flow_data": get_flow_data,
+    "generate_chart_data": generate_chart_data
 }
 
 #---------------------------------------
@@ -1071,6 +1527,15 @@ class SolarAssistantRAG:
         - If system_id is None and the user asks about energy production or CO2 savings, inform them that they need to select a system first.
         - Do NOT attempt to infer or extract a system_id from conversation history. Use ONLY the provided system_id value.
         
+        CHART GENERATION:
+        - When users ask to "show", "display", "graph", "chart", or "visualize" data, AUTOMATICALLY use the generate_chart_data function
+        - IMPORTANT: Do NOT ask for permission - generate the chart immediately when users use these keywords
+        - Keywords that trigger automatic chart generation: "show me", "display", "graph", "chart", "visualize", "plot"
+        - Examples: "show me production for 2023", "display CO2 savings this year", "chart my earnings"
+        - Always provide a helpful text summary along with the chart data
+        - For chart requests, be descriptive about what the chart will show
+        - The chart will be automatically rendered by the frontend when chart_data is provided
+        
         DATA HANDLING:
         - The API responses now include pre-calculated total values that you should use directly.
         - For energy production data, use the "total_energy_kwh" field for the total energy in kilowatt-hours.
@@ -1138,6 +1603,7 @@ class SolarAssistantRAG:
             
             # Check if the model wants to call a function
             source_documents = []
+            chart_data = None
             if response_message.tool_calls:
                 # Extract function calls
                 messages.append({
@@ -1152,7 +1618,7 @@ class SolarAssistantRAG:
                     function_args = json.loads(tool_call.function.arguments)
                     
                     # Override system_id with the one provided in the request, if applicable
-                    if system_id and function_name in ["get_energy_production", "get_co2_savings", "get_flow_data"]:
+                    if system_id and function_name in ["get_energy_production", "get_co2_savings", "get_flow_data", "generate_chart_data"]:
                         function_args["system_id"] = system_id
                         function_args["jwt_token"] = jwt_token  # Add JWT token to function args
                     
@@ -1172,6 +1638,18 @@ class SolarAssistantRAG:
                         # Save source documents for RAG queries
                         if function_name == "search_vector_db" and isinstance(function_response, list):
                             source_documents = function_response
+                        
+                        # Save chart data for visualization
+                        if function_name == "generate_chart_data" and isinstance(function_response, dict) and "error" not in function_response:
+                            chart_data = function_response
+                            logger.info(f"=== CHART DATA CAPTURED ===")
+                            logger.info(f"Chart data type: {chart_data.get('data_type', 'unknown')}")
+                            logger.info(f"Chart title: {chart_data.get('title', 'unknown')}")
+                            logger.info(f"Chart data points: {len(chart_data.get('data_points', []))}")
+                            logger.info(f"Chart total value: {chart_data.get('total_value', 'unknown')}")
+                            logger.info(f"Chart unit: {chart_data.get('unit', 'unknown')}")
+                        elif function_name == "generate_chart_data":
+                            logger.warning(f"Chart data generation failed or returned error: {function_response}")
                 
                 # Add the function responses to the messages
                 if tool_responses:
@@ -1242,16 +1720,27 @@ class SolarAssistantRAG:
             # Log memory state after updating
             print(f"Memory after processing: {len(memory.chat_memory.messages)} messages")
             
+            # Log final response structure
+            logger.info(f"=== FINAL RESPONSE STRUCTURE ===")
+            logger.info(f"Response text length: {len(final_response)} characters")
+            logger.info(f"Source documents count: {len(source_documents)}")
+            logger.info(f"Chart data present: {'Yes' if chart_data else 'No'}")
+            if chart_data:
+                logger.info(f"Chart data keys: {list(chart_data.keys()) if isinstance(chart_data, dict) else 'Not a dict'}")
+            logger.info(f"=== END FINAL RESPONSE STRUCTURE ===")
+            
             return {
                 "response": final_response,
-                "source_documents": source_documents
+                "source_documents": source_documents,
+                "chart_data": chart_data
             }
             
         except Exception as e:
             print(f"Error in OpenAI function calling: {e}")
             return {
                 "response": f"I encountered an error while processing your request: {str(e)}",
-                "source_documents": []
+                "source_documents": [],
+                "chart_data": None
             }
 
 # Global RAG instance
@@ -1367,7 +1856,8 @@ async def chat(chat_message: ChatMessage):
         
         return ChatResponse(
             response=result["response"],
-            source_documents=source_documents
+            source_documents=source_documents,
+            chart_data=result.get("chart_data")
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

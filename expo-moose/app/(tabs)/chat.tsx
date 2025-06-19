@@ -28,6 +28,7 @@ import { Picker } from '@react-native-picker/picker';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import Constants from "expo-constants";
+import { LineChart } from "@/components/LineChart";
 
 // --- API Configuration ---
 const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
@@ -49,6 +50,7 @@ interface ChatRequest {
 interface ChatResponse {
   response: string;
   source_documents?: SourceDocument[];
+  chart_data?: ChartData;
 }
 
 interface SourceDocument {
@@ -56,8 +58,29 @@ interface SourceDocument {
   metadata?: any;
 }
 
-const getChatResponse = async (message: string, userId: string, systemId: string | null, username: string = 'Guest User', sessionDeviceId: string): Promise<string> => {
+interface ChartData {
+  chart_type: string;
+  data_type: string;
+  title: string;
+  x_axis_label: string;
+  y_axis_label: string;
+  data_points: Array<{x: string, y: number}>;
+  time_period: string;
+  total_value?: number;
+  unit: string;
+  system_name?: string;
+}
+
+const getChatResponse = async (message: string, userId: string, systemId: string | null, username: string = 'Guest User', sessionDeviceId: string): Promise<{response: string, chartData?: ChartData}> => {
   try {
+    console.log("=== GETCHATRESPONSE START ===");
+    console.log("Parameters:");
+    console.log("- message:", message);
+    console.log("- userId:", userId);
+    console.log("- systemId:", systemId);
+    console.log("- username:", username);
+    console.log("- sessionDeviceId:", sessionDeviceId);
+    
     const jwtToken = await getJwtToken();
     
     // Use the provided session device ID to ensure consistency between calls
@@ -65,6 +88,7 @@ const getChatResponse = async (message: string, userId: string, systemId: string
     // Combine the user ID, device ID, and system ID into a single identifier
     // Format: userId_deviceId_systemId
     const combinedId = `${userId}_${sessionDeviceId}${systemId ? `_${systemId}` : ''}`;
+    console.log("Combined ID:", combinedId);
     
     const requestData = {
       username: username,
@@ -78,13 +102,33 @@ const getChatResponse = async (message: string, userId: string, systemId: string
     const response = await axios.post<ChatResponse>(API_URL, requestData);
     
     console.log("Received response from API:", response.data);
+    
+    // Log chart data specifically
+    if (response.data.chart_data) {
+      console.log("=== CHART DATA RECEIVED ===");
+      console.log("Chart data type:", response.data.chart_data.data_type);
+      console.log("Chart title:", response.data.chart_data.title);
+      console.log("Chart data points count:", response.data.chart_data.data_points?.length || 0);
+      console.log("Chart total value:", response.data.chart_data.total_value);
+      console.log("Chart unit:", response.data.chart_data.unit);
+      console.log("First 3 data points:", response.data.chart_data.data_points?.slice(0, 3));
+      console.log("=== END CHART DATA ===");
+    } else {
+      console.log("No chart data in response");
+    }
+    
     if (response.data && response.data.response) {
-      return response.data.response;
+      console.log("=== GETCHATRESPONSE SUCCESS ===");
+      return {
+        response: response.data.response,
+        chartData: response.data.chart_data
+      };
     } else {
       console.error("Unexpected API response structure:", response.data);
       throw new Error("Received unexpected data structure from API");
     }
   } catch (error: unknown) {
+    console.log("=== GETCHATRESPONSE ERROR ===");
     if (axios.isAxiosError(error)) {
       if (error.response) {
         console.error("API Error Response Data:", error.response.data);
@@ -105,6 +149,7 @@ const getChatResponse = async (message: string, userId: string, systemId: string
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  chart_data?: ChartData;
 }
 
 // System interface for selection
@@ -488,6 +533,11 @@ export default function ChatScreen() {
       return; // Prevent sending empty message
     }
 
+    console.log("=== HANDLESEND START ===");
+    console.log("Content to send:", contentToSend);
+    console.log("Selected system ID:", selectedSystemId);
+    console.log("User info:", { id: user?.id, name: user?.name });
+
     const userMessage: ChatMessage = { role: "user", content: contentToSend };
 
     setMessages((prevMessages) => [...prevMessages, userMessage]);
@@ -499,7 +549,7 @@ export default function ChatScreen() {
 
     try {
       // Pass the selected system ID to the API if one is selected
-      const responseMessage = await getChatResponse(
+      const { response, chartData } = await getChatResponse(
         contentToSend, 
         user?.id || 'default_user',
         selectedSystemId,
@@ -507,12 +557,28 @@ export default function ChatScreen() {
         deviceId.current
       );
       
+      console.log("=== RESPONSE RECEIVED IN HANDLESEND ===");
+      console.log("Response length:", response.length);
+      console.log("Chart data present:", !!chartData);
+      if (chartData) {
+        console.log("Chart data in handleSend:");
+        console.log("- data_type:", chartData.data_type);
+        console.log("- title:", chartData.title);
+        console.log("- data_points count:", chartData.data_points?.length || 0);
+        console.log("- total_value:", chartData.total_value);
+      }
+      
       const assistantMessage: ChatMessage = {
         role: "assistant",
-        content: responseMessage,
+        content: response,
+        chart_data: chartData
       };
+      
+      console.log("Creating assistant message with chart_data:", !!assistantMessage.chart_data);
       setMessages((prevMessages) => [...prevMessages, assistantMessage]);
+      console.log("=== HANDLESEND SUCCESS ===");
     } catch (error) {
+      console.log("=== HANDLESEND ERROR ===");
       console.error("Error in handleSend:", error);
       const errorMessage: ChatMessage = {
         role: "assistant",
@@ -528,92 +594,107 @@ export default function ChatScreen() {
 
   // --- Render Each Message Item ---
   const renderMessage = ({ item }: { item: ChatMessage }) => (
-    <View
-      style={[
-        styles.messageBubble,
-        item.role === "user"
-          ? [styles.userBubble, { backgroundColor: colors.primary }]
-          : [
-              styles.assistantBubble,
-              { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
-            ],
-      ]}
-    >
-      <Text
+    <>
+      <View
         style={[
-          styles.messageRoleText,
-          { color: item.role === "user" ? "#fff" : colors.text },
+          styles.messageBubble,
+          item.role === "user"
+            ? [styles.userBubble, { backgroundColor: colors.primary }]
+            : [
+                styles.assistantBubble,
+                { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
+              ],
         ]}
       >
-        {item.role === "user" ? "You" : "Solar Assistant"}
-      </Text>
-      {item.role === "assistant" ? (
-        // Use Markdown component for assistant messages
-        <Markdown style={{
-          body: {
-            color: colors.text,
-            fontSize: 16,
-            lineHeight: 22,
-          },
-          heading1: {
-            color: colors.text,
-            fontWeight: "bold",
-            marginTop: 8,
-            marginBottom: 4,
-            fontSize: 20,
-          },
-          heading2: {
-            color: colors.text,
-            fontWeight: "bold",
-            marginTop: 8,
-            marginBottom: 4,
-            fontSize: 18,
-          },
-          heading3: {
-            color: colors.text,
-            fontWeight: "bold",
-            marginTop: 6,
-            marginBottom: 3,
-            fontSize: 16,
-          },
-          link: {
-            color: colors.primary,
-          },
-          blockquote: {
-            backgroundColor: isDarkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)",
-            borderLeftColor: colors.primary,
-            borderLeftWidth: 4,
-            paddingLeft: 8,
-            paddingRight: 8,
-            paddingTop: 4,
-            paddingBottom: 4,
-            marginTop: 8,
-            marginBottom: 8,
-          },
-          code_block: {
-            backgroundColor: isDarkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)",
-            padding: 8,
-            borderRadius: 4,
-            fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-            fontSize: 14,
-          },
-          code_inline: {
-            backgroundColor: isDarkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)",
-            fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-            padding: 2,
-            borderRadius: 2,
-            fontSize: 14,
-          },
-        }}>
-          {item.content}
-        </Markdown>
-      ) : (
-        // Use standard Text for user messages
-        <Text style={[styles.messageContentText, { color: "#fff" }]}>
-          {item.content}
+        <Text
+          style={[
+            styles.messageRoleText,
+            { color: item.role === "user" ? "#fff" : colors.text },
+          ]}
+        >
+          {item.role === "user" ? "You" : "Solar Assistant"}
         </Text>
+        {item.role === "assistant" ? (
+          <View>
+            {/* Use Markdown component for assistant messages */}
+            <Markdown style={{
+              body: {
+                color: colors.text,
+                fontSize: 16,
+                lineHeight: 22,
+              },
+              heading1: {
+                color: colors.text,
+                fontWeight: "bold",
+                marginTop: 8,
+                marginBottom: 4,
+                fontSize: 20,
+              },
+              heading2: {
+                color: colors.text,
+                fontWeight: "bold",
+                marginTop: 8,
+                marginBottom: 4,
+                fontSize: 18,
+              },
+              heading3: {
+                color: colors.text,
+                fontWeight: "bold",
+                marginTop: 6,
+                marginBottom: 3,
+                fontSize: 16,
+              },
+              link: {
+                color: colors.primary,
+              },
+              blockquote: {
+                backgroundColor: isDarkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)",
+                borderLeftColor: colors.primary,
+                borderLeftWidth: 4,
+                paddingLeft: 8,
+                paddingRight: 8,
+                paddingTop: 4,
+                paddingBottom: 4,
+                marginTop: 8,
+                marginBottom: 8,
+              },
+              code_block: {
+                backgroundColor: isDarkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)",
+                padding: 8,
+                borderRadius: 4,
+                fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                fontSize: 14,
+              },
+              code_inline: {
+                backgroundColor: isDarkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)",
+                fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+                padding: 2,
+                borderRadius: 2,
+                fontSize: 14,
+              },
+            }}>
+              {item.content}
+            </Markdown>
+          </View>
+        ) : (
+          // Use standard Text for user messages
+          <Text style={[styles.messageContentText, { color: "#fff" }]}>
+            {item.content}
+          </Text>
+        )}
+      </View>
+      
+      {/* Render chart outside the message bubble if chart_data is present */}
+      {item.chart_data && (
+        <View style={styles.chartContainer}>
+          <LineChart 
+            chartData={item.chart_data}
+            isDarkMode={isDarkMode}
+            colors={colors}
+          />
+        </View>
       )}
-    </View>
+    </>
   );
 
   // --- Handle Clicking Initial Prompts ---
@@ -697,6 +778,33 @@ export default function ChatScreen() {
         >
           <Text style={[styles.promptButtonText, { color: colors.text }]}>
             How much did I make last month?
+          </Text>
+        </TouchableOpacity>
+        
+        {/* Chart-specific prompts */}
+        <TouchableOpacity
+          style={[
+            styles.promptButton,
+            { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
+          ]}
+          onPress={() => handlePromptClick(`Show me energy production for 2024${systemText}`)}
+          disabled={isLoading}
+        >
+          <Text style={[styles.promptButtonText, { color: colors.text }]}>
+            📊 Show me energy production for 2024
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[
+            styles.promptButton,
+            { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
+          ]}
+          onPress={() => handlePromptClick(`Display my CO2 savings this year${systemText}`)}
+          disabled={isLoading}
+        >
+          <Text style={[styles.promptButtonText, { color: colors.text }]}>
+            🌱 Display my CO2 savings this year
           </Text>
         </TouchableOpacity>
       </View>
@@ -1051,5 +1159,10 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  chartContainer: {
+    marginTop: 8,
+    marginBottom: 8,
+    marginHorizontal: 0, // Small horizontal margin for padding from screen edges
   },
 }); 
