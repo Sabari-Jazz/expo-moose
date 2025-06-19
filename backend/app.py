@@ -1057,7 +1057,7 @@ def generate_chart_data(
                 total_value = total_value * 0.40
                 unit = "$"
                 logger.info(f"Calculated earnings total_value: {total_value}")
-            else:
+        else:
                 unit = "kWh"
                 logger.info(f"Energy production total_value: {total_value}")
                 
