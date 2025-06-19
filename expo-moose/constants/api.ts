@@ -5,19 +5,22 @@
 // - Use '10.0.2.2' when testing in Android emulator
 // - Use your machine's actual IP (e.g., '192.168.1.5') when testing on physical devices
 // export const DEV_API_HOST = '172.17.161.41'; // Your actual development machine IP
-export const DEV_API_HOST = '10.0.0.210'
+//export const DEV_API_HOST = '10.0.0.210'
 // API URL for development and production
-export const API_URL = __DEV__ 
+/*export const API_URL = __DEV__ 
   ? `http://${DEV_API_HOST}:8000` // Development API URL
   : 'https://api.solarmonitor.app';
-
+*/
+export const API_URL = 'https://vfcfg6edj6.execute-api.us-east-1.amazonaws.com/'
 // Add API_BASE_URL for SolarWeb API
 export const API_BASE_URL = process.env.API_BASE_URL || 'https://api.solarweb.com/swqapi';
 
 // Websocket URL for real-time communication
+/*
 export const WS_URL = __DEV__
   ? `ws://${DEV_API_HOST}:8000/ws`
   : 'wss://api.solarmonitor.app/ws';
+  */
 
 // API endpoints
 export const ENDPOINTS = {
