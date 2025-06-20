@@ -318,7 +318,7 @@ import {
       }
 
       const user: User = {
-        id: userProfile.username, // Use username as id as specified
+        id: userProfile.userId, 
         username: userProfile.username,
         name: userProfile.name,
         email: userProfile.email,
