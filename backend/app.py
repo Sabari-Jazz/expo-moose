@@ -16,6 +16,8 @@ from mangum import Mangum  # Add Mangum import
 import boto3
 from botocore.exceptions import ClientError
 import logging
+import uuid
+from decimal import Decimal
 
 # Langchain imports
 
@@ -1057,7 +1059,7 @@ def generate_chart_data(
                 total_value = total_value * 0.40
                 unit = "$"
                 logger.info(f"Calculated earnings total_value: {total_value}")
-        else:
+            else:
                 unit = "kWh"
                 logger.info(f"Energy production total_value: {total_value}")
                 
@@ -1843,6 +1845,15 @@ async def chat(chat_message: ChatMessage):
             chat_message.username
         )
         
+        # Log the conversation to DynamoDB
+        log_conversation_to_db(
+            user_id=user_id,
+            user_message=chat_message.message,
+            bot_response=result["response"],
+            system_id=system_id,
+            chart_data=result.get("chart_data")
+        )
+        
         # Process source documents if present
         source_documents = []
         if result.get("source_documents"):
@@ -1880,7 +1891,7 @@ def register_device_in_db(device_data: DeviceRegistration) -> DeviceResponse:
     """Register a device for push notifications in DynamoDB"""
     if not table:
         return DeviceResponse(success=False, message="Database not available")
-    
+    print('INSIDE REGISTER DEVICE IN DB', device_data)
     try:
         # Create device record in the exact format requested
         device_item = {
@@ -2008,17 +2019,55 @@ def get_user_profile(user_id: str) -> Dict[str, Any]:
             return {
                 'email': item.get('email', ''),
                 'name': item.get('name', ''),
-                'role': item.get('role', 'user'),
                 'username': item.get('username', ''),
-                'userId': item.get('userId', user_id)
+                'role': item.get('role', 'user'),
+                'createdAt': item.get('createdAt', ''),
+                'lastLogin': item.get('lastLogin', '')
             }
         else:
-            return {"error": f"User profile not found for user_id: {user_id}"}
+            return {"error": "User profile not found"}
             
     except Exception as e:
-        print(f"Error getting user profile: {str(e)}")
-        return {"error": str(e)}
+        return {"error": f"Error getting user profile: {str(e)}"}
 
+def log_conversation_to_db(user_id: str, user_message: str, bot_response: str, system_id: str = None, chart_data: dict = None):
+    """Log chatbot conversation to DynamoDB"""
+    if not table:
+        logger.error("Cannot log conversation - database not available")
+        return
+    
+    try:
+        timestamp = datetime.now().isoformat()
+        conversation_id = str(uuid.uuid4())
+        
+        # Create conversation log item
+        log_item = {
+            'PK': f'CHAT#{user_id}',
+            'SK': f'CONVERSATION#{timestamp}',
+            'user_message': user_message,
+            'bot_response': bot_response,
+            'system_id': system_id,
+            'timestamp': timestamp,
+            'conversation_id': conversation_id,
+            'has_chart': chart_data is not None
+        }
+        
+        # Add chart data if present
+        if chart_data:
+            log_item['chart_data'] = {
+                'data_type': chart_data.get('data_type', ''),
+                'time_period': chart_data.get('time_period', ''),
+                'total_value': Decimal(str(chart_data.get('total_value', 0))),  # Convert to Decimal
+                'unit': chart_data.get('unit', ''),
+                'data_points_count': len(chart_data.get('data_points', []))
+            }
+        
+        # Store in DynamoDB
+        table.put_item(Item=log_item)
+        logger.info(f"Logged conversation for user {user_id} with ID {conversation_id}")
+        
+    except Exception as e:
+        logger.error(f"Failed to log conversation for user {user_id}: {str(e)}")
 
 # CONSOLIDATED DATA FUNCTIONS
 

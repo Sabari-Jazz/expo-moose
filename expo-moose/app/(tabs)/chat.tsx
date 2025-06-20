@@ -31,8 +31,8 @@ import Constants from "expo-constants";
 import { LineChart } from "@/components/LineChart";
 
 // --- API Configuration ---
-const API_URL= 'https://vfcfg6edj6.execute-api.us-east-1.amazonaws.com/api/chat'
-//const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
+//const API_URL= 'https://vfcfg6edj6.execute-api.us-east-1.amazonaws.com/api/chat'
+const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
 //const API_URL = "http://172.17.49.217:8000/chat";
 /*
 const API_URL = 
