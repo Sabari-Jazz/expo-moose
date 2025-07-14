@@ -2,20 +2,15 @@
 Solar Device Status Polling Script
 
 This script polls the Solar.web API to check device status, current power,
-and error conditions for all inverters. It uses moon time periods to determine
-status logic, updates DynamoDB when status changes, and sends SNS notifications.
+and error conditions for all inverters. It updates DynamoDB when status changes
+and sends SNS notifications for status changes.
 
 Key Features:
 - Monitors individual inverters instead of systems
 - Uses device-specific endpoints for flowdata and messages
-- Status logic: green/red/Moon based on moon time periods, power, and error conditions
+- Simplified status logic: offline/green/red based on connectivity, power, and errors
 - Updates DynamoDB only when status changes
 - Sends SNS notifications for status changes
-
-Status Logic:
-- Within moon time (after sunset-1h OR before sunrise+1h): transitions between green/red/Moon based on power and current status
-- Within daylight time (sunrise+1h to sunset-1h): green if power > 0, red if power = 0 (with specific error reasons)
-- Uses system-specific timezones (America/New_York or America/Chicago) for accurate time comparisons
 
 Usage:
 - As a script: python device_status_polling.py
@@ -29,16 +24,11 @@ import requests
 import boto3
 import time
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal
 import threading
 import botocore.config
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    # Fallback for systems without zoneinfo (like older Python versions)
-    ZoneInfo = None
 
 # Set up logging
 logging.basicConfig(
@@ -99,12 +89,6 @@ _error_codes_cache = {
 
 # Thread lock for stats
 stats_lock = threading.Lock()
-
-# Rate limiter for WeatherAPI calls (max 50 calls per minute)
-weatherapi_rate_limiter = {
-    'calls': [],  # List of timestamps when calls were made
-    'lock': threading.Lock()
-}
 
 class InverterMetadata:
     def __init__(self, pv_system_id: str, device_id: str, system_name: str = None):
@@ -274,7 +258,6 @@ def get_sunrise_sunset_data(system_id: str, target_date: datetime) -> Dict[str, 
                 'SK': f'DATA#DAILY#{date_str}'
             }
         )
-        logger.info('INSIDE SUN DATA RESPONSE', response)
         
         if 'Item' in response:
             item = response['Item']
@@ -282,10 +265,10 @@ def get_sunrise_sunset_data(system_id: str, target_date: datetime) -> Dict[str, 
             sunset = item.get('sunset')
             
             if sunrise and sunset:
-                logger.info(f"Found sunrise/sunset for system {system_id} on {date_str}: {sunrise} - {sunset}")
+                logger.debug(f"Found sunrise/sunset for system {system_id} on {date_str}: {sunrise} - {sunset}")
                 return {'sunrise': sunrise, 'sunset': sunset}
             else:
-                logger.info(f"Sunrise/sunset fields missing for system {system_id} on {date_str}")
+                logger.debug(f"Sunrise/sunset fields missing for system {system_id} on {date_str}")
                 return {}
         else:
             logger.debug(f"No daily data found for system {system_id} on {date_str}")
@@ -325,37 +308,37 @@ def get_suntimes(system_id: str, target_date: datetime) -> Dict[str, str]:
         
         logger.info(f"Found GPS coordinates for system {system_id}: {latitude}, {longitude}")
         
-        # Call WeatherAPI for astronomy data
-        api_key = "54e30ff3809e4e15a98191133250907"  # You may want to update this key for WeatherAPI
+        # Call Visual Crossing API
+        api_key = "X9KZYU8V4ZHYSBRV54ZNE72WP"
         date_str = target_date.strftime('%Y-%m-%d')
+        
+        base_url = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
         location = f"{latitude},{longitude}"
-        
-        astronomy_url = "http://api.weatherapi.com/v1/astronomy.json"
-        astronomy_params = {
+        params = {
             "key": api_key,
-            "q": location
+            "include": "days",
+            "unitGroup": "metric",
+            "contentType": "json"
         }
+        url = f"{base_url}/{location}/{date_str}"
         
-        # Enforce rate limit before making API call
-        enforce_weatherapi_rate_limit()
-        
-        logger.info(f"Calling WeatherAPI for system {system_id}")
-        response = requests.get(astronomy_url, params=astronomy_params, timeout=30)
+        logger.info(f"Calling Visual Crossing API for system {system_id} on {date_str}")
+        response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
         
         data = response.json()
         
-        # Extract sunrise and sunset times from WeatherAPI response
-        if 'astronomy' not in data or 'astro' not in data['astronomy']:
-            logger.warning(f"No astronomy data returned from WeatherAPI for system {system_id}")
+        # Extract sunrise and sunset times
+        if 'days' not in data or len(data['days']) == 0:
+            logger.warning(f"No day data returned from Visual Crossing API for system {system_id}")
             return {}
         
-        astro_data = data['astronomy']['astro']
-        sunrise = astro_data.get('sunrise')
-        sunset = astro_data.get('sunset')
+        day_data = data['days'][0]
+        sunrise = day_data.get('sunrise')
+        sunset = day_data.get('sunset')
         
         if not sunrise or not sunset:
-            logger.warning(f"Missing sunrise/sunset data in WeatherAPI response for system {system_id}")
+            logger.warning(f"Missing sunrise/sunset data in API response for system {system_id}")
             return {}
         
         logger.info(f"Retrieved sun times for system {system_id}: sunrise={sunrise}, sunset={sunset}")
@@ -391,122 +374,76 @@ def get_suntimes(system_id: str, target_date: datetime) -> Dict[str, str]:
         logger.error(f"Error getting sun times for system {system_id}: {str(e)}")
         return {}
 
-def is_daylight_saving_time(dt: datetime) -> bool:
-    """Determine if a given datetime falls within US daylight saving time period"""
-    year = dt.year
+def is_within_daylight_hours(sunrise_str: str, sunset_str: str) -> bool:
+    """Check if current local time is between sunrise and sunset with 1-hour buffer
     
-    # DST starts on the second Sunday in March
-    march_first = datetime(year, 3, 1)
-    march_first_weekday = march_first.weekday()  # Monday = 0, Sunday = 6
-    days_until_first_sunday = (6 - march_first_weekday) % 7
-    first_sunday_march = march_first + timedelta(days=days_until_first_sunday)
-    second_sunday_march = first_sunday_march + timedelta(days=7)
-    dst_start = second_sunday_march.replace(hour=2)  # 2 AM
-    
-    # DST ends on the first Sunday in November
-    nov_first = datetime(year, 11, 1)
-    nov_first_weekday = nov_first.weekday()
-    days_until_first_sunday = (6 - nov_first_weekday) % 7
-    first_sunday_nov = nov_first + timedelta(days=days_until_first_sunday)
-    dst_end = first_sunday_nov.replace(hour=2)  # 2 AM
-    
-    return dst_start <= dt < dst_end
-
-def get_system_timezone(pv_system_id: str) -> Optional[str]:
-    """Get timezone for a system from DynamoDB system profile"""
-    try:
-        response = table.get_item(
-            Key={
-                'PK': f'System#{pv_system_id}',
-                'SK': 'PROFILE'
-            }
-        )
-        
-        if 'Item' in response:
-            timezone = response['Item'].get('timeZone')
-            if timezone:
-                logger.debug(f"Found timezone {timezone} for system {pv_system_id}")
-                return timezone
-            else:
-                logger.warning(f"No timezone found in profile for system {pv_system_id}")
-                return None
-        else:
-            logger.warning(f"No profile found for system {pv_system_id}")
-            return None
-            
-    except Exception as e:
-        logger.error(f"Error getting timezone for system {pv_system_id}: {str(e)}")
-        return None
-
-def is_moon_time(sunrise_str: str, sunset_str: str, system_timezone: Optional[str] = None) -> bool:
-    """Check if current time in system timezone is AFTER 1 hour before sunset OR BEFORE 1 hour after sunrise
-    
-    Moon time logic:
-    - Moon time starts 1 hour BEFORE sunset
-    - Moon time ends 1 hour AFTER sunrise
-    This covers evening/night/early morning hours
-    
-    Args:
-        sunrise_str: Sunrise time in "HH:MM AM/PM" format (in system timezone)
-        sunset_str: Sunset time in "HH:MM AM/PM" format (in system timezone)
-        system_timezone: Timezone string like "America/New_York" or "America/Chicago"
+    Buffer logic:
+    - Daylight hours start 1 hour BEFORE sunrise
+    - Daylight hours end 1 hour AFTER sunset
+    This extends the period when green↔offline transitions are blocked
     """
     try:
-        # Parse sunrise and sunset times (format: "05:22 AM" or "08:50 PM")
-        sunrise_time = datetime.strptime(sunrise_str, "%I:%M %p")
-        sunset_time = datetime.strptime(sunset_str, "%I:%M %p")
+        # Parse sunrise and sunset times (format: "21:02:16")
+        sunrise_time = datetime.strptime(sunrise_str, "%H:%M:%S")
+        sunset_time = datetime.strptime(sunset_str, "%H:%M:%S")
         
-        # Moon time boundaries
-        moon_start = (sunset_time - timedelta(hours=1)).time()  # 1 hour before sunset
-        moon_end = (sunrise_time + timedelta(hours=1)).time()   # 1 hour after sunrise
+        # Add 1-hour buffer: start daylight 1 hour before sunrise, end 1 hour after sunset
+        buffered_sunrise = (sunrise_time - timedelta(hours=1)).time()
+        buffered_sunset = (sunset_time + timedelta(hours=1)).time()
         
-        # Get current time in the system's timezone
-        if system_timezone:
-            try:
-                # Manual timezone conversion for the two supported timezones
-                utc_now = datetime.utcnow()
-                is_dst = is_daylight_saving_time(utc_now)
-                
-                if system_timezone == "America/New_York":
-                    # Eastern Time: UTC-5 (EST) or UTC-4 (EDT)
-                    offset_hours = 4 if is_dst else 5
-                    current_time_in_system_tz = (utc_now - timedelta(hours=offset_hours)).time()
-                    tz_name = "EDT" if is_dst else "EST"
-                    logger.debug(f"Current time in {system_timezone} ({tz_name}): {current_time_in_system_tz}")
-                elif system_timezone == "America/Chicago":
-                    # Central Time: UTC-6 (CST) or UTC-5 (CDT)
-                    offset_hours = 5 if is_dst else 6
-                    current_time_in_system_tz = (utc_now - timedelta(hours=offset_hours)).time()
-                    tz_name = "CDT" if is_dst else "CST"
-                    logger.debug(f"Current time in {system_timezone} ({tz_name}): {current_time_in_system_tz}")
-                else:
-                    logger.warning(f"Unknown timezone {system_timezone}, using server local time")
-                    current_time_in_system_tz = datetime.now().time()
-                    
-            except Exception as tz_error:
-                logger.warning(f"Error converting to timezone {system_timezone}: {tz_error}. Using server local time.")
-                current_time_in_system_tz = datetime.now().time()
+        # Get current local time
+        current_time = datetime.now().time()
+        
+        # Check if current time is between buffered sunrise and buffered sunset
+        if buffered_sunrise <= buffered_sunset:
+            # Normal case: buffered sunrise before buffered sunset (same day)
+            is_daylight = buffered_sunrise <= current_time <= buffered_sunset
+            logger.info(f"Daylight check: {current_time} between {buffered_sunrise} (sunrise-1h) and {buffered_sunset} (sunset+1h) = {is_daylight}")
         else:
-            # Fallback to server local time if no timezone provided
-            logger.warning("No system timezone provided, using server local time")
-            current_time_in_system_tz = datetime.now().time()
+            # Edge case: buffered sunset after midnight (crosses day boundary)
+            is_daylight = current_time >= buffered_sunrise or current_time <= buffered_sunset
         
-        # Check if current time is in moon time period
-        # Moon time is AFTER (sunset-1h) OR BEFORE (sunrise+1h)
-        # This typically crosses midnight (e.g., after 5 PM or before 7 AM)
-        is_moon = current_time_in_system_tz >= moon_start or current_time_in_system_tz <= moon_end
-        
-        logger.info(f"Moon time check for timezone {system_timezone}: {current_time_in_system_tz} after {moon_start} (sunset-1h) OR before {moon_end} (sunrise+1h) = {is_moon}")
-        
-        logger.debug(f"Moon time boundaries: starts at {moon_start} (sunset-1h), ends at {moon_end} (sunrise+1h)")
+        logger.debug(f"Daylight check with buffer: {current_time} between {buffered_sunrise} (sunrise-1h) and {buffered_sunset} (sunset+1h) = {is_daylight}")
         logger.debug(f"Original times: sunrise={sunrise_str}, sunset={sunset_str}")
-        return is_moon
+        return is_daylight
         
     except Exception as e:
-        logger.error(f"Error checking moon time with sunrise={sunrise_str}, sunset={sunset_str}, timezone={system_timezone}: {str(e)}")
-        return False  # Default to daylight time if there's an error
+        logger.error(f"Error checking daylight hours with sunrise={sunrise_str}, sunset={sunset_str}: {str(e)}")
+        return True  # Default to allowing changes if there's an error
 
-
+def should_allow_green_offline_transition(current_status: str, new_status: str, system_id: str, target_date: datetime) -> bool:
+    """Check if green↔offline transition should be allowed based on daylight hours"""
+    
+    # Only apply sunrise/sunset logic to green↔offline transitions
+    if not ((current_status == 'green' and new_status == 'offline') or 
+            (current_status == 'offline' and new_status == 'green')):
+        logger.debug(f"Allowing non-green/offline transition: {current_status} → {new_status}")
+        return True
+    
+    logger.info(f"Checking daylight hours for green↔offline transition: {current_status} → {new_status} for system {system_id}")
+    
+    # Try to get sunrise/sunset data from DynamoDB
+    sun_data = get_sunrise_sunset_data(system_id, target_date)
+    
+    if not sun_data:
+        # No data found, try to get from external service
+        logger.info(f"No sunrise/sunset data in DB for system {system_id}, calling get_suntimes()")
+        sun_data = get_suntimes(system_id, target_date)
+    
+    if not sun_data or 'sunrise' not in sun_data or 'sunset' not in sun_data:
+        # Still no data, allow the transition (fallback behavior)
+        logger.warning(f"No sunrise/sunset data available for system {system_id}, allowing transition")
+        return True
+    
+    # Check if current time is within daylight hours
+    is_daylight = is_within_daylight_hours(sun_data['sunrise'], sun_data['sunset'])
+    
+    if is_daylight:
+        logger.info(f"Current time is within daylight hours - allowing {current_status} → {new_status}")
+        return True
+    else:
+        logger.info(f"Current time is outside daylight hours - blocking {current_status} → {new_status}")
+        return False
 
 def get_all_inverters() -> List[InverterMetadata]:
     """Get all inverters from DynamoDB"""
@@ -528,23 +465,6 @@ def get_all_inverters() -> List[InverterMetadata]:
                     pv_system_id=pv_system_id,
                     device_id=device_id
                 ))
-        while 'LastEvaluatedKey' in response:
-            response = table.scan(
-                ExclusiveStartKey=response['LastEvaluatedKey'],
-                FilterExpression=boto3.dynamodb.conditions.Attr('PK').begins_with('Inverter#') & 
-                            boto3.dynamodb.conditions.Attr('SK').eq('STATUS')
-            )
-            for item in response.get('Items', []):
-                # Extract device ID from PK (remove "Inverter<" prefix and ">" suffix)
-                device_id = item.get('device_id', '')
-                pv_system_id = item.get('pvSystemId', '')
-                
-                if device_id and pv_system_id:
-                    inverters.append(InverterMetadata(
-                        pv_system_id=pv_system_id,
-                        device_id=device_id
-                    ))
-       
         
         logger.info(f"Found {len(inverters)} inverters from DynamoDB")
         return inverters
@@ -632,7 +552,6 @@ def get_device_status_from_db(device_id: str) -> Dict[str, Any]:
         else:
             return {
                 'status': 'green',
-                'reason': '',
                 'lastUpdated': None,
                 'lastStatusChangeTime': None,
                 'power': 0
@@ -642,13 +561,12 @@ def get_device_status_from_db(device_id: str) -> Dict[str, Any]:
         logger.error(f"Error getting device status for {device_id}: {str(e)}")
         return {
             'status': 'green',
-            'reason': '',
             'lastUpdated': None,
             'lastStatusChangeTime': None,
             'power': 0
         }
 
-def update_device_status_in_db(device_id: str, pv_system_id: str, status: str, power: float, reason: str, status_changed: bool = False) -> bool:
+def update_device_status_in_db(device_id: str, pv_system_id: str, status: str, power: float, status_changed: bool = False) -> bool:
     """Update device status in DynamoDB"""
     try:
         now = datetime.utcnow().isoformat()
@@ -666,7 +584,6 @@ def update_device_status_in_db(device_id: str, pv_system_id: str, status: str, p
             'pvSystemId': pv_system_id,
             'device_id': device_id,
             'status': status,
-            'reason': reason,
             'power': Decimal(str(power)),  # Convert float to Decimal for DynamoDB
             'lastStatusChangeTime': last_status_change_time,  # Only update if status actually changed
             'lastUpdated': now  # Always update this timestamp
@@ -674,7 +591,7 @@ def update_device_status_in_db(device_id: str, pv_system_id: str, status: str, p
         
         table.put_item(Item=status_item)
         if status_changed:
-            logger.info(f"✅ Status changed for device {device_id} to {status} (reason: {reason})")
+            logger.info(f"✅ Status changed for device {device_id} to {status}")
         else:
             logger.info(f"✅ Updated device {device_id} data (status remains {status})")
         return True
@@ -683,7 +600,7 @@ def update_device_status_in_db(device_id: str, pv_system_id: str, status: str, p
         logger.error(f"❌ Error updating status for device {device_id}: {str(e)}")
         return False
 
-def send_device_status_change_sns(device_id: str, pv_system_id: str, new_status: str, previous_status: str, power: float, new_reason: str, previous_reason: str, sunrise_time: str = None, sunset_time: str = None, timezone: str = None, flow_data: Dict[str, Any] = None) -> bool:
+def send_device_status_change_sns(device_id: str, pv_system_id: str, new_status: str, previous_status: str, power: float) -> bool:
     """Send SNS message for device status change"""
     try:
         message = {
@@ -691,72 +608,35 @@ def send_device_status_change_sns(device_id: str, pv_system_id: str, new_status:
             "pvSystemId": pv_system_id,
             "newStatus": new_status,
             "previousStatus": previous_status,
-            "newReason": new_reason,
-            "previousReason": previous_reason,
             "timestamp": datetime.utcnow().isoformat(),
-            "power": power,
-            "sunrise_time": sunrise_time,
-            "sunset_time": sunset_time,
-            "timezone": timezone,
-            "flow_data": flow_data
+            "power": power
         }
-        
-        # Build message attributes
-        message_attributes = {
-            'source': {
-                'DataType': 'String',
-                'StringValue': 'device-status-polling-script'
-            },
-            'deviceId': {
-                'DataType': 'String',
-                'StringValue': device_id
-            },
-            'systemId': {
-                'DataType': 'String',
-                'StringValue': pv_system_id
-            },
-            'statusChange': {
-                'DataType': 'String',
-                'StringValue': f'{previous_status}-{new_status}'
-            }
-        }
-        
-        # Add sunrise_time if provided
-        if sunrise_time:
-            message_attributes['sunrise_time'] = {
-                'DataType': 'String',
-                'StringValue': sunrise_time
-            }
-        
-        # Add sunset_time if provided
-        if sunset_time:
-            message_attributes['sunset_time'] = {
-                'DataType': 'String',
-                'StringValue': sunset_time
-            }
-        
-        # Add timezone if provided
-        if timezone:
-            message_attributes['timezone'] = {
-                'DataType': 'String',
-                'StringValue': timezone
-            }
-        
-        # Add flow_data if provided
-        if flow_data:
-            message_attributes['flow_data'] = {
-                'DataType': 'String',
-                'StringValue': json.dumps(flow_data, default=str)
-            }
         
         response = sns.publish(
             TopicArn=SNS_TOPIC_ARN,
             Subject=f"Solar Inverter Status Change - {device_id}",
             Message=json.dumps(message),
-            MessageAttributes=message_attributes
+            MessageAttributes={
+                'source': {
+                    'DataType': 'String',
+                    'StringValue': 'device-status-polling-script'
+                },
+                'deviceId': {
+                    'DataType': 'String',
+                    'StringValue': device_id
+                },
+                'systemId': {
+                    'DataType': 'String',
+                    'StringValue': pv_system_id
+                },
+                'statusChange': {
+                    'DataType': 'String',
+                    'StringValue': f'{previous_status}-{new_status}'
+                }
+            }
         )
         
-        logger.info(f"✅ Sent SNS status change notification for device {device_id}: {previous_status} → {new_status} (reason: {new_reason}). Message ID: {response['MessageId']}")
+        logger.info(f"✅ Sent SNS status change notification for device {device_id}: {previous_status} → {new_status}. Message ID: {response['MessageId']}")
         return True
         
     except Exception as e:
@@ -764,184 +644,132 @@ def send_device_status_change_sns(device_id: str, pv_system_id: str, new_status:
         return False
 
 def process_device_status(inverter: InverterMetadata, target_date: datetime, stats: Dict[str, int]) -> bool:
-    """Process status for a single inverter device - New Workflow Logic"""
+    """Process status for a single inverter device - Simplified Logic"""
     try:
         logger.info(f"Processing status for device: {inverter.device_id} (System: {inverter.pv_system_id})")
         
         # Get current device status from DynamoDB
         current_status_data = get_device_status_from_db(inverter.device_id)
         current_status = current_status_data.get('status', 'green')
-        current_reason = current_status_data.get('reason', '')
         last_updated = current_status_data.get('lastUpdated')
         
         # Get flowdata to check online status and power
         flowdata = get_device_flowdata(inverter.pv_system_id, inverter.device_id)
         
-        # Determine power - treat offline devices as no power
-        power = 0.0
-        if flowdata:
-            status_data = flowdata.get('status', {})
-            is_online = status_data.get('isOnline', False)
-            
-            if is_online:
-                # Device is online, get power from data channels
-                data_section = flowdata.get('data')
-                
-                if data_section is not None:
-                    # Data section exists, extract power from channels
-                    channels = data_section.get('channels', [])
-                    
-                    for channel in channels:
-                        channel_name = channel.get('channelName', '')
-                        if (channel_name in ['PowerPV', 'PowerOutput', 'Power'] and 
-                            channel.get('value') is not None):
-                            power = float(channel['value'])
-                            logger.debug(f"Found power value {power}W in channel '{channel_name}' for device {inverter.device_id}")
-                            break
-                    
-                    logger.info(f"Device {inverter.device_id} is online with power: {power}W")
-                else:
-                    # Data section is null - treat as online with 0 power
-                    power = 0.0
-                    logger.info(f"Device {inverter.device_id} is online but data is null - treating as 0 power")
-            else:
-                # Device is offline - treat as no power
-                power = 0.0
-                logger.info(f"Device {inverter.device_id} is offline - treating as no power")
-        else:
-            # No flowdata - treat as no power
+        # Handle null/empty flowdata (device is considered offline)
+        if not flowdata:
+            new_status = 'offline'
             power = 0.0
-            logger.info(f"Device {inverter.device_id} has no flowdata - treating as no power")
-        
-        # Get sunrise/sunset data for daylight hours check
-        sun_data = get_sunrise_sunset_data(inverter.pv_system_id, target_date)
-        logger.info(f"Sun data: {sun_data}")
-        if sun_data == {}:
-            sun_data = get_suntimes(inverter.pv_system_id, target_date)
-            logger.info(f"New Sun data: {sun_data}")
-        
-        # Get system timezone for accurate time comparison
-        system_timezone = get_system_timezone(inverter.pv_system_id)
-        if system_timezone:
-            logger.info(f"Using system timezone {system_timezone} for device {inverter.device_id}")
+            logger.info(f"Device {inverter.device_id} is offline - no flowdata received")
+            print(f"🔌 Device {inverter.device_id}: status is OFFLINE because no flowdata received")
         else:
-            logger.warning(f"No timezone found for system {inverter.pv_system_id}, using server local time")
-        
-        # Determine if we're within moon time (1 hour before sunset to 1 hour after sunrise)
-        is_moon_time_period = False
-        if sun_data and 'sunrise' in sun_data and 'sunset' in sun_data:
-            is_moon_time_period = is_moon_time(sun_data['sunrise'], sun_data['sunset'], system_timezone)
-        
-        # Apply new workflow logic
-        new_status = current_status
-        new_reason = current_reason
-        
-        if is_moon_time_period:
-            # Moon time logic (1 hour before sunset to 1 hour after sunrise)
-            logger.info(f"Device {inverter.device_id} is within moon time")
+            # Check if device is online (with null-safe access)
+            status_data = flowdata.get('status') if flowdata else None
+            is_online = status_data.get('isOnline', False) if status_data else False
             
-            if current_status == 'red' and power == 0:
-                # Red + no power → keep Red
-                new_status = 'red'
-                logger.info(f"Device {inverter.device_id}: Red + no power → keeping Red")
-            elif current_status == 'red' and power > 0:
-                # Red + power → set to Green
-                new_status = 'green'
-                new_reason = ''
-                logger.info(f"Device {inverter.device_id}: Red + power → setting to Green")
-            elif current_status == 'Moon' and power == 0:
-                # Moon + no power → keep Moon
-                new_status = 'Moon'
-                logger.info(f"Device {inverter.device_id}: Moon + no power → keeping Moon")
-            elif current_status == 'Moon' and power > 0:
-                # Moon + power → set to Green
-                new_status = 'green'
-                new_reason = ''
-                logger.info(f"Device {inverter.device_id}: Moon + power → setting to Green")
-            elif current_status == 'green' and power > 0:
-                # Green + power → keep Green
-                new_status = 'green'
-                logger.info(f"Device {inverter.device_id}: Green + power → keeping Green")
-            elif current_status == 'green' and power == 0:
-                # Green + no power → set to Moon
-                new_status = 'Moon'
-                new_reason = 'no production during moon time'
-                logger.info(f"Device {inverter.device_id}: Green + no power → setting to Moon")
-            
-        else:
-            # Daylight time logic (1 hour after sunrise to 1 hour before sunset)
-            logger.info(f"Device {inverter.device_id} is within daylight time")
-            
-            if power > 0:
-                # Power > 0 → set to Green (clear all errors)
-                new_status = 'green'
-                new_reason = ''
-                logger.info(f"Device {inverter.device_id}: Power > 0 → setting to Green")
+            if not is_online:
+                # Device is offline
+                new_status = 'offline'
+                power = 0.0
+                logger.info(f"Device {inverter.device_id} is offline - isOnline is false")
+                print(f"🔌 Device {inverter.device_id}: status is OFFLINE because device is not reachable")
             else:
-                # Power = 0 → check for red error codes
-                logger.info(f"Device {inverter.device_id}: Power = 0 → checking for red errors")
+                # Device is online, get power (with null-safe access)
+                power = 0.0
+                data_section = flowdata.get('data') if flowdata else None
+                channels = data_section.get('channels', []) if data_section else []
                 
-                # Determine timestamp to check messages from
+                for channel in channels:
+                    # Look for power channels - could be PowerPV, PowerOutput, or other power-related channels
+                    channel_name = channel.get('channelName', '')
+                    if (channel_name in ['PowerPV', 'PowerOutput', 'Power'] and 
+                        channel.get('value') is not None):
+                        power = float(channel['value'])
+                        logger.debug(f"Found power value {power}W in channel '{channel_name}' for device {inverter.device_id}")
+                        break
+                
+                logger.info(f"Device {inverter.device_id} is online with power: {power}W")
+                
+                # Determine the timestamp to check messages from
                 if last_updated:
+                    # Convert ISO timestamp to Fronius API format (yyyyMMddTHHmmssTZD)
                     try:
+                        # Parse the ISO timestamp
                         dt = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
+                        # Convert to Fronius API format
                         from_timestamp = dt.strftime("%Y%m%dT%H%M%S") + "Z"
+                        logger.debug(f"Checking messages for device {inverter.device_id} since last update: {last_updated} -> {from_timestamp}")
                     except Exception as e:
-                        logger.warning(f"Error parsing lastUpdated timestamp: {e}")
+                        logger.warning(f"Error parsing lastUpdated timestamp {last_updated} for device {inverter.device_id}: {e}. Using today instead.")
                         from_timestamp = target_date.strftime("%Y%m%dT%H%M%S") + "Z"
                 else:
+                    # No previous update, check from today in Fronius API format
                     from_timestamp = target_date.strftime("%Y%m%dT%H%M%S") + "Z"
+                    logger.debug(f"No previous update for device {inverter.device_id}, checking messages from today: {from_timestamp}")
                 
-                # Get error messages
+                # Get error messages since last update
                 messages_response = get_device_messages(inverter.pv_system_id, inverter.device_id, from_timestamp)
                 
-                # Check for red error codes
-                red_error_code = None
+                # Check for red error messages
+                has_red_errors = False
                 if messages_response and 'messages' in messages_response and messages_response['messages']:
+                    # Pre-load error codes
+                    error_codes = [msg['stateCode'] for msg in messages_response['messages']]
                     color_map = get_all_error_codes_from_supabase()
                     
+                    # Check if any new errors are red
                     for msg in messages_response['messages']:
                         error_code = msg['stateCode']
                         if color_map.get(error_code) == 'red':
-                            red_error_code = error_code
-                            logger.info(f"Found red error {error_code} for device {inverter.device_id}")
+                            has_red_errors = True
+                            logger.info(f"Found new red error {error_code} for device {inverter.device_id} at {msg.get('logDateTime', 'unknown time')}")
                             break
                 
-                # Set status based on error check
-                if red_error_code:
-                    new_status = 'red'
-                    new_reason = f'error code: {red_error_code}'
-                    logger.info(f"Device {inverter.device_id}: Red error found → setting to Red with reason: {new_reason}")
+                # Simplified Status Logic
+                if has_red_errors or current_status == 'red':
+                    # There are new red errors OR current status is red
+                    if power > 0:
+                        # Power is above 0 - set status to green (red errors cleared)
+                        new_status = 'green'
+                        print(f"✅ Device {inverter.device_id}: status is GREEN because power > 0 ({power}W) - red errors cleared")
+                    else:
+                        # Power is 0 or less - set/keep status as red
+                        new_status = 'red'
+                        print(f"🔴 Device {inverter.device_id}: status is RED because power ≤ 0 ({power}W) with red errors")
                 else:
-                    new_status = 'red'
-                    new_reason = 'no production'
-                    logger.info(f"Device {inverter.device_id}: No red errors → setting to Red with reason: no production")
+                    # No new red errors and current status is not red
+                    if current_status == 'offline' and power == 0:
+                        # Keep as offline if previously offline and still no power
+                        new_status = 'offline'
+                        print(f"🔌 Device {inverter.device_id}: status remains OFFLINE because online but no power ({power}W)")
+                    else:
+                        new_status = 'green'
+                        print(f"✅ Device {inverter.device_id}: status is GREEN because no new red errors")
+        
+        # Check if green↔offline transition should be allowed based on daylight hours
+        if not should_allow_green_offline_transition(current_status, new_status, inverter.pv_system_id, target_date):
+            logger.info(f"Blocking green↔offline transition for device {inverter.device_id}: {current_status} → {new_status} (outside daylight hours)")
+            new_status = current_status  # Keep current status
         
         # Update status counters
         if new_status == 'green':
             update_stats_thread_safe(stats, 'green_devices')
         elif new_status == 'red':
             update_stats_thread_safe(stats, 'red_devices')
-        elif new_status == 'Moon':
-            update_stats_thread_safe(stats, 'moon_devices')
+        elif new_status == 'offline':
+            update_stats_thread_safe(stats, 'offline_devices')
         
-        # Check if status or reason changed
-        status_changed = (new_status != current_status) or (new_reason != current_reason)
-        
-        if status_changed:
+        # Check if status changed
+        if new_status != current_status:
             # Update DynamoDB
             update_success = update_device_status_in_db(
-                inverter.device_id, inverter.pv_system_id, new_status, power, new_reason, status_changed=True
+                inverter.device_id, inverter.pv_system_id, new_status, power, status_changed=True
             )
             
             if update_success:
                 # Send SNS notification
                 sns_success = send_device_status_change_sns(
-                    inverter.device_id, inverter.pv_system_id, new_status, current_status, power, new_reason, current_reason,
-                    sunrise_time=sun_data.get('sunrise') if sun_data else None,
-                    sunset_time=sun_data.get('sunset') if sun_data else None,
-                    timezone=system_timezone,
-                    flow_data=flowdata
+                    inverter.device_id, inverter.pv_system_id, new_status, current_status, power
                 )
                 
                 if sns_success:
@@ -953,7 +781,7 @@ def process_device_status(inverter: InverterMetadata, target_date: datetime, sta
                 return False
         else:
             # No status change, but still update lastUpdated timestamp and power
-            update_device_status_in_db(inverter.device_id, inverter.pv_system_id, new_status, power, new_reason, status_changed=False)
+            update_device_status_in_db(inverter.device_id, inverter.pv_system_id, new_status, power, status_changed=False)
             logger.info(f"No status change for device {inverter.device_id} (remains {current_status})")
             return True
         
@@ -965,40 +793,6 @@ def update_stats_thread_safe(stats, key, increment=1):
     """Thread-safe stats update"""
     with stats_lock:
         stats[key] += increment
-
-def enforce_weatherapi_rate_limit():
-    """Enforce WeatherAPI rate limit of 50 calls per minute"""
-    with weatherapi_rate_limiter['lock']:
-        now = time.time()
-        one_minute_ago = now - 60
-        
-        # Remove calls older than 1 minute
-        weatherapi_rate_limiter['calls'] = [
-            call_time for call_time in weatherapi_rate_limiter['calls'] 
-            if call_time > one_minute_ago
-        ]
-        
-        # Check if we're at the limit (use 50 to be safe)
-        if len(weatherapi_rate_limiter['calls']) >= 50:
-            # Find the oldest call in the current minute
-            oldest_call = min(weatherapi_rate_limiter['calls'])
-            wait_time = oldest_call + 60 - now
-            
-            if wait_time > 0:
-                logger.info(f"WeatherAPI rate limit reached. Waiting {wait_time:.2f} seconds...")
-                time.sleep(wait_time)
-                
-                # Clean up the list again after waiting
-                now = time.time()
-                one_minute_ago = now - 60
-                weatherapi_rate_limiter['calls'] = [
-                    call_time for call_time in weatherapi_rate_limiter['calls'] 
-                    if call_time > one_minute_ago
-                ]
-        
-        # Record this call
-        weatherapi_rate_limiter['calls'].append(now)
-        logger.debug(f"WeatherAPI calls in last minute: {len(weatherapi_rate_limiter['calls'])}/50")
 
 def process_devices_concurrently():
     """Main function to process all devices for status"""
@@ -1013,7 +807,7 @@ def process_devices_concurrently():
         'api_calls_made': 0,
         'green_devices': 0,
         'red_devices': 0,
-        'moon_devices': 0
+        'offline_devices': 0
     }
     
     try:
@@ -1083,15 +877,15 @@ def process_devices_concurrently():
         logger.info(f"🌐 Total API calls made: {stats['api_calls_made']}")
         logger.info(f"✅ Green devices: {stats['green_devices']}")
         logger.info(f"🔴 Red devices: {stats['red_devices']}")
-        logger.info(f"🌙 Moon devices: {stats['moon_devices']}")
+        logger.info(f"🔌 Offline devices: {stats['offline_devices']}")
         logger.info(f"❌ Errors: {stats['errors']}")
         
         # Print summary counts
         print(f"\n🏁 FINAL DEVICE STATUS SUMMARY:")
         print(f"✅ GREEN: {stats['green_devices']} devices")
         print(f"🔴 RED: {stats['red_devices']} devices") 
-        print(f"🌙 MOON: {stats['moon_devices']} devices")
-        print(f"📊 Total: {stats['green_devices'] + stats['red_devices'] + stats['moon_devices']} devices")
+        print(f"🔌 OFFLINE: {stats['offline_devices']} devices")
+        print(f"📊 Total: {stats['green_devices'] + stats['red_devices'] + stats['offline_devices']} devices")
         print(f"🔄 Status changes: {stats['status_changes']}")
         print("=" * 50)
         
@@ -1129,49 +923,4 @@ def lambda_handler(event, context):
         }
 
 if __name__ == "__main__":
-    # Simulate EventBridge scheduler trigger for lambda_handler
-    print("🚀 Simulating EventBridge scheduler trigger for lambda_handler...")
-    
-    # Create mock event that EventBridge scheduler would send
-    mock_event = {
-        "version": "0",
-        "id": "12345678-1234-1234-1234-123456789012",
-        "detail-type": "Scheduled Event",
-        "source": "aws.scheduler",
-        "account": "123456789012",
-        "time": datetime.utcnow().isoformat() + "Z",
-        "region": "us-east-1",
-        "resources": [
-            "arn:aws:scheduler:us-east-1:123456789012:schedule/default/device-status-polling"
-        ],
-        "detail": {}
-    }
-    
-    # Create mock context object
-    class MockContext:
-        def __init__(self):
-            self.function_name = "device-status-polling"
-            self.function_version = "$LATEST"
-            self.invoked_function_arn = "arn:aws:lambda:us-east-1:123456789012:function:device-status-polling"
-            self.memory_limit_in_mb = "512"
-            self.remaining_time_in_millis = lambda: 300000  # 5 minutes
-            self.log_group_name = "/aws/lambda/device-status-polling"
-            self.log_stream_name = "2024/01/01/[$LATEST]abcdefghijklmnopqrstuvwxyz123456"
-            self.aws_request_id = "12345678-1234-1234-1234-123456789012"
-    
-    mock_context = MockContext()
-    
-    print("📋 Mock Event:", json.dumps(mock_event, indent=2, default=str))
-    print("🏗️  Mock Context function_name:", mock_context.function_name)
-    print("⏰ Starting lambda_handler simulation...")
-    
-    try:
-        # Call the lambda_handler with mock event and context
-        result = lambda_handler(mock_event, mock_context)
-        
-        print("✅ Lambda handler completed successfully!")
-        print("📤 Lambda Response:", json.dumps(result, indent=2, default=str))
-        
-    except Exception as e:
-        print(f"❌ Lambda handler failed: {str(e)}")
-        raise 
+    main() 

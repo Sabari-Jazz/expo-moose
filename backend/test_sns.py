@@ -32,7 +32,7 @@ def send_test_device_status_change_sns() -> bool:
     """Send a test SNS message for device status change from green to red"""
     try:
         # Test device and system IDs
-        device_id = "test-device-12345678"
+        device_id = "062e5910-9e1c-438d-8214-5ee290515a3f"
         pv_system_id = "bf915090-5f59-4128-a206-46c73f2f779d"  # Using existing system ID
         new_status = "red"
         previous_status = "green"

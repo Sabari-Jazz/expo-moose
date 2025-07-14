@@ -1,44 +1,96 @@
 """
-Solar O&M Chatbot API with Langchain RAG Pipeline
+Chat Service Lambda Function
+Handles: /chat, /health  
+Direct split from app.py with NO logic changes
 """
+
 import os
 import json
 from typing import Dict, List, Optional, Any
-import re
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-import uvicorn
 from dotenv import load_dotenv
 import requests
 from datetime import datetime, timedelta
-from mangum import Mangum  # Add Mangum import
+from mangum import Mangum
 import boto3
-from botocore.exceptions import ClientError
 import logging
-import uuid
 from decimal import Decimal
 
 # Langchain imports
-
 from langchain_openai import OpenAIEmbeddings
-from langchain.docstore.document import Document
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 from langchain_openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationalRetrievalChain
 from langchain_pinecone import PineconeVectorStore
 from pinecone.grpc import PineconeGRPC as Pinecone
-from pinecone import ServerlessSpec
 
 # Import OpenAI for direct function calling
-import openai
 from openai import OpenAI
-from decimal import Decimal
+import uuid
 
 # Load environment variables
 load_dotenv()
+
+#---------------------------------------
+# DynamoDB Helper Functions
+#---------------------------------------
+
+def convert_dynamodb_decimals(obj):
+    """Convert DynamoDB Decimal objects to regular numbers for JSON serialization"""
+    if isinstance(obj, list):
+        return [convert_dynamodb_decimals(i) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: convert_dynamodb_decimals(v) for k, v in obj.items()}
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    else:
+        return obj
+
+def get_user_profile_if_needed(user_id: str, user_profile: dict = None) -> dict:
+    """Get user profile from DynamoDB if not already provided to minimize DB calls"""
+    if user_profile:
+        return user_profile
+    
+    try:
+        response = table.get_item(
+            Key={
+                'PK': f'User#{user_id}',
+                'SK': 'PROFILE'
+            }
+        )
+        
+        if 'Item' in response:
+            return convert_dynamodb_decimals(response['Item'])
+        else:
+            return {"error": f"User profile not found for user {user_id}"}
+    except Exception as e:
+        print(f"Error getting user profile for {user_id}: {str(e)}")
+        return {"error": f"Failed to get user profile: {str(e)}"}
+
+def validate_system_access(user_id: str, system_id: str, user_profile: dict = None) -> bool:
+    """Validate that a user has access to a specific system"""
+    profile = get_user_profile_if_needed(user_id, user_profile)
+    
+    if "error" in profile:
+        return False
+    
+    # Admin users have access to all systems
+    if profile.get('role') == 'admin':
+        return True
+    
+    # Check if user has access to this specific system
+    try:
+        response = table.get_item(
+            Key={
+                'PK': f'User#{user_id}',
+                'SK': f'System#{system_id}'
+            }
+        )
+        return 'Item' in response
+    except Exception as e:
+        print(f"Error validating system access for user {user_id}, system {system_id}: {str(e)}")
+        return False
 
 # Set up logging
 logging.basicConfig(
@@ -64,8 +116,8 @@ except Exception as e:
 
 # Create FastAPI app
 app = FastAPI(
-    title="Solar O&M Chatbot API",
-    description="API for a chatbot specialized in solar operations and maintenance",
+    title="Chat Service",
+    description="Chat service for solar operations and maintenance chatbot",
     version="0.1.0"
 )
 
@@ -85,7 +137,7 @@ api_key = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=api_key)
 
 #---------------------------------------
-# Pydantic Models
+# Pydantic Models - EXACT COPIES from app.py
 #---------------------------------------
 
 class ChatMessage(BaseModel):
@@ -102,15 +154,15 @@ class SourceDocument(BaseModel):
 
 class ChartData(BaseModel):
     """Chart data for visualization"""
-    chart_type: str = "line"  # "line", "bar", "pie"
-    data_type: str  # "energy_production", "co2_savings", "earnings"
+    chart_type: str = "line"
+    data_type: str
     title: str
     x_axis_label: str
     y_axis_label: str
-    data_points: List[Dict[str, Any]]  # [{"x": "2023-01", "y": 1500}, ...]
-    time_period: str  # "daily", "monthly", "yearly", "weekly"
+    data_points: List[Dict[str, Any]]
+    time_period: str
     total_value: Optional[float] = None
-    unit: str  # "kWh", "kg CO2", "$"
+    unit: str
     system_name: Optional[str] = None
 
 class ChatResponse(BaseModel):
@@ -119,74 +171,427 @@ class ChatResponse(BaseModel):
     source_documents: Optional[List[SourceDocument]] = None
     chart_data: Optional[ChartData] = None
 
-# Add function schema models
-class SearchVectorDBParams(BaseModel):
-    """Parameters for the search_vector_db function"""
-    query: str = Field(description="The query to search for in the vector database")
-    limit: Optional[int] = Field(default=3, description="The maximum number of results to return")
-
-class GetEnergyProductionParams(BaseModel):
-    """Parameters for the get_energy_production function"""
-    system_id: str = Field(description="The ID of the system to get data for")
-    period: str = Field(description="The time period to get data for (today, week, month, year, custom)")
-    start_date: Optional[str] = Field(default=None, description="Start date for custom period (format: YYYY-MM-DD)")
-    duration: Optional[int] = Field(default=None, description="Duration in days for custom period")
-
-class GetCO2SavingsParams(BaseModel):
-    """Parameters for the get_co2_savings function"""
-    system_id: str = Field(description="The ID of the system to get data for")
-    period: str = Field(description="The time period to get data for (today, week, month, year, custom)")
-    start_date: Optional[str] = Field(default=None, description="Start date for custom period (format: YYYY-MM-DD)")
-    duration: Optional[int] = Field(default=None, description="Duration in days for custom period")
-
-# User Management Models
-class UserRegistration(BaseModel):
-    """User registration data"""
-    user_id: str = Field(description="Unique user identifier")
-    name: str = Field(description="User's full name")
-    username: str = Field(description="Username")
-    email: str = Field(description="User's email address")
-    role: str = Field(default="user", description="User role (user, admin)")
-
-class DeviceRegistration(BaseModel):
-    """Device registration for push notifications"""
-    user_id: str = Field(description="User ID owning this device")
-    device_id: str = Field(description="Unique device identifier")
-    expo_push_token: str = Field(description="Expo push notification token")
-    platform: str = Field(description="Device platform (ios, android)")
-
-class SystemUserLink(BaseModel):
-    """Link a user to a solar system"""
-    user_id: str = Field(description="User ID")
-    system_id: str = Field(description="Solar system ID")
-
-class UserResponse(BaseModel):
-    """Response for user operations"""
-    success: bool
-    message: str
-    user_id: Optional[str] = None
-
-class DeviceResponse(BaseModel):
-    """Response for device operations"""
-    success: bool
-    message: str
-    device_id: Optional[str] = None
-
-class SystemLinkResponse(BaseModel):
-    """Response for system linking operations"""
-    success: bool
-    message: str
-    links_count: Optional[int] = None
-
-#---------------------------------------
-# Knowledge Base
-#---------------------------------------
-
-# Sample solar O&M knowledge base
-
-
-# Sample user context to maintain conversation state
+# Sample user context
 user_contexts: Dict[str, Dict] = {}
+
+#---------------------------------------
+# Main DynamoDB Functions
+#---------------------------------------
+
+def get_user_information(user_id: str, data_type: str, user_profile: dict = None) -> dict:
+    """
+    Get user information from DynamoDB.
+    
+    Args:
+        user_id: The user ID to get information for
+        data_type: Type of information to retrieve ('profile' or 'systems')
+        user_profile: Optional pre-fetched user profile to minimize DB calls
+        
+    Returns:
+        Dictionary with user information
+    """
+    try:
+        if data_type == "profile":
+            # Get user profile
+            profile = get_user_profile_if_needed(user_id, user_profile)
+            if "error" in profile:
+                return profile
+            
+            return {
+                "success": True,
+                "data": profile,
+                "query_info": {
+                    "user_id": user_id,
+                    "query_type": "profile"
+                }
+            }
+        
+        elif data_type == "systems":
+            # Get user's accessible systems
+            profile = get_user_profile_if_needed(user_id, user_profile)
+            if "error" in profile:
+                return profile
+            
+            if profile.get('role') == 'admin':
+                # Admin gets all systems (limited to 50 for performance)
+                response = table.scan(
+                    FilterExpression='begins_with(PK, :pk) AND SK = :sk',
+                    ExpressionAttributeValues={
+                        ':pk': 'System#',
+                        ':sk': 'PROFILE'
+                    },
+                    Limit=50
+                )
+                
+                systems = []
+                for item in response.get('Items', []):
+                    systems.append(convert_dynamodb_decimals(item))
+                
+                # Get total count for pagination message
+                total_response = table.scan(
+                    FilterExpression='begins_with(PK, :pk) AND SK = :sk',
+                    ExpressionAttributeValues={
+                        ':pk': 'System#',
+                        ':sk': 'PROFILE'
+                    },
+                    Select='COUNT'
+                )
+                
+                total_count = total_response.get('Count', len(systems))
+                
+                result = {
+                    "success": True,
+                    "data": systems,
+                    "query_info": {
+                        "user_id": user_id,
+                        "query_type": "systems",
+                        "user_role": "admin"
+                    }
+                }
+                
+                if total_count > 50:
+                    result["pagination"] = {
+                        "total_systems": total_count,
+                        "showing": len(systems),
+                        "message": f"Showing {len(systems)} of {total_count} systems. Ask 'show me more systems' to see additional results."
+                    }
+                
+                return result
+            else:
+                # Regular user gets their linked systems
+                response = table.query(
+                    KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
+                    ExpressionAttributeValues={
+                        ':pk': f'User#{user_id}',
+                        ':sk': 'System#'
+                    }
+                )
+                
+                system_links = response.get('Items', [])
+                systems = []
+                
+                # Get full system profiles for each linked system
+                for link in system_links:
+                    system_id = link.get('systemId')
+                    if system_id:
+                        system_response = table.get_item(
+                            Key={
+                                'PK': f'System#{system_id}',
+                                'SK': 'PROFILE'
+                            }
+                        )
+                        if 'Item' in system_response:
+                            systems.append(convert_dynamodb_decimals(system_response['Item']))
+                
+                return {
+                    "success": True,
+                    "data": systems,
+                    "query_info": {
+                        "user_id": user_id,
+                        "query_type": "systems",
+                        "systems_count": len(systems)
+                    }
+                }
+        
+        else:
+            return {"error": f"Invalid data_type '{data_type}'. Use 'profile' or 'systems'."}
+    
+    except Exception as e:
+        print(f"Error in get_user_information: {str(e)}")
+        return {"error": f"Failed to get user information: {str(e)}"}
+
+def get_system_information(user_id: str, system_id: str, data_type: str, user_profile: dict = None) -> dict:
+    """
+    Get system information from DynamoDB.
+    
+    Args:
+        user_id: The user ID requesting the information
+        system_id: The system ID to get information for
+        data_type: Type of information to retrieve ('profile', 'status', or 'inverter_count')
+        user_profile: Optional pre-fetched user profile to minimize DB calls
+        
+    Returns:
+        Dictionary with system information
+    """
+    try:
+        # Validate system access
+        if not validate_system_access(user_id, system_id, user_profile):
+            return {
+                "error": f"You don't have access to system {system_id}",
+                "system_id": system_id
+            }
+        
+        if data_type == "profile":
+            # Get system profile
+            response = table.get_item(
+                Key={
+                    'PK': f'System#{system_id}',
+                    'SK': 'PROFILE'
+                }
+            )
+            
+            if 'Item' not in response:
+                return {"error": f"System profile not found for system {system_id}"}
+            
+            system_data = convert_dynamodb_decimals(response['Item'])
+            
+            return {
+                "success": True,
+                "data": system_data,
+                "query_info": {
+                    "user_id": user_id,
+                    "system_id": system_id,
+                    "query_type": "profile"
+                }
+            }
+        
+        elif data_type == "status":
+            # Get system status
+            response = table.get_item(
+                Key={
+                    'PK': f'System#{system_id}',
+                    'SK': 'STATUS'
+                }
+            )
+            
+            if 'Item' not in response:
+                return {
+                    "success": True,
+                    "data": {"note": "No status data available for this system"},
+                    "query_info": {
+                        "user_id": user_id,
+                        "system_id": system_id,
+                        "query_type": "status"
+                    }
+                }
+            
+            status_data = convert_dynamodb_decimals(response['Item'])
+            
+            return {
+                "success": True,
+                "data": status_data,
+                "query_info": {
+                    "user_id": user_id,
+                    "system_id": system_id,
+                    "query_type": "status"
+                }
+            }
+        
+        elif data_type == "inverter_count":
+            # Get count of inverters for this system
+            response = table.query(
+                IndexName='system-inverter-index',  # Using GSI2
+                KeyConditionExpression='GSI2PK = :pk AND begins_with(GSI2SK, :sk)',
+                ExpressionAttributeValues={
+                    ':pk': f'System#{system_id}',
+                    ':sk': 'Inverter#'
+                }
+            )
+            
+            inverter_count = len(response.get('Items', []))
+            
+            return {
+                "success": True,
+                "data": {
+                    "inverter_count": inverter_count,
+                    "system_id": system_id
+                },
+                "query_info": {
+                    "user_id": user_id,
+                    "system_id": system_id,
+                    "query_type": "inverter_count"
+                }
+            }
+        
+        else:
+            return {"error": f"Invalid data_type '{data_type}'. Use 'profile', 'status', or 'inverter_count'."}
+    
+    except Exception as e:
+        print(f"Error in get_system_information: {str(e)}")
+        return {"error": f"Failed to get system information: {str(e)}"}
+
+def get_inverter_information(user_id: str, system_id: str, data_type: str, user_profile: dict = None) -> dict:
+    """
+    Get inverter information from DynamoDB.
+    
+    Args:
+        user_id: The user ID requesting the information
+        system_id: The system ID to get inverters for
+        data_type: Type of information to retrieve ('profiles', 'status', or 'details')
+        user_profile: Optional pre-fetched user profile to minimize DB calls
+        
+    Returns:
+        Dictionary with inverter information
+    """
+    try:
+        # Validate system access
+        if not validate_system_access(user_id, system_id, user_profile):
+            return {
+                "error": f"You don't have access to system {system_id}",
+                "system_id": system_id
+            }
+        
+        # Get all inverters for this system using GSI2
+        response = table.query(
+            IndexName='system-inverter-index',  # Using GSI2
+            KeyConditionExpression='GSI2PK = :pk AND begins_with(GSI2SK, :sk)',
+            ExpressionAttributeValues={
+                ':pk': f'System#{system_id}',
+                ':sk': 'Inverter#'
+            }
+        )
+        
+        inverter_links = response.get('Items', [])
+        if not inverter_links:
+            return {
+                "success": True,
+                "data": {
+                    "note": f"No inverters found for system {system_id}",
+                    "inverters": []
+                },
+                "query_info": {
+                    "user_id": user_id,
+                    "system_id": system_id,
+                    "query_type": data_type
+                }
+            }
+        
+        inverters_data = []
+        
+        for link in inverter_links:
+            inverter_id = link.get('GSI2SK', '').replace('Inverter#', '')
+            if not inverter_id:
+                continue
+            
+            if data_type == "profiles":
+                # Get inverter profile
+                inverter_response = table.get_item(
+                    Key={
+                        'PK': f'Inverter#{inverter_id}',
+                        'SK': 'PROFILE'
+                    }
+                )
+                
+                if 'Item' in inverter_response:
+                    inverters_data.append(convert_dynamodb_decimals(inverter_response['Item']))
+            
+            elif data_type == "status":
+                # Get inverter status
+                inverter_response = table.get_item(
+                    Key={
+                        'PK': f'Inverter#{inverter_id}',
+                        'SK': 'STATUS'
+                    }
+                )
+                
+                if 'Item' in inverter_response:
+                    inverters_data.append(convert_dynamodb_decimals(inverter_response['Item']))
+                else:
+                    # Add placeholder for missing status
+                    inverters_data.append({
+                        "inverter_id": inverter_id,
+                        "note": "No status data available for this inverter"
+                    })
+            
+            elif data_type == "details":
+                # Get both profile and status
+                profile_response = table.get_item(
+                    Key={
+                        'PK': f'Inverter#{inverter_id}',
+                        'SK': 'PROFILE'
+                    }
+                )
+                
+                status_response = table.get_item(
+                    Key={
+                        'PK': f'Inverter#{inverter_id}',
+                        'SK': 'STATUS'
+                    }
+                )
+                
+                inverter_detail = {}
+                if 'Item' in profile_response:
+                    inverter_detail.update(convert_dynamodb_decimals(profile_response['Item']))
+                
+                if 'Item' in status_response:
+                    inverter_detail.update(convert_dynamodb_decimals(status_response['Item']))
+                elif 'Item' in profile_response:
+                    inverter_detail['status_note'] = "No status data available"
+                
+                if inverter_detail:
+                    inverters_data.append(inverter_detail)
+        
+        return {
+            "success": True,
+            "data": {
+                f"system_{system_id}": inverters_data
+            },
+            "query_info": {
+                "user_id": user_id,
+                "system_id": system_id,
+                "query_type": data_type,
+                "inverter_count": len(inverters_data)
+            }
+        }
+    
+    except Exception as e:
+        print(f"Error in get_inverter_information: {str(e)}")
+        return {"error": f"Failed to get inverter information: {str(e)}"}
+
+def get_user_incidents(user_id: str, status: str = None, user_profile: dict = None) -> dict:
+    """
+    Get user incidents from DynamoDB.
+    
+    Args:
+        user_id: The user ID to get incidents for
+        status: Optional status filter ("pending", "processed", or None for all)
+        user_profile: Optional pre-fetched user profile to minimize DB calls
+        
+    Returns:
+        Dictionary with incident information
+    """
+    try:
+        # Build query parameters
+        query_params = {
+            'IndexName': 'incident-user-index',  # Using GSI3
+            'KeyConditionExpression': 'GSI3PK = :pk',
+            'ExpressionAttributeValues': {
+                ':pk': f'User#{user_id}'
+            }
+        }
+        
+        # Add status filter if specified
+        if status:
+            query_params['FilterExpression'] = 'begins_with(PK, :incident_prefix) AND #status = :status'
+            query_params['ExpressionAttributeNames'] = {'#status': 'status'}
+            query_params['ExpressionAttributeValues'].update({
+                ':incident_prefix': 'Incident#',
+                ':status': status
+            })
+        
+        response = table.query(**query_params)
+        
+        incidents = []
+        for item in response.get('Items', []):
+            incidents.append(convert_dynamodb_decimals(item))
+        
+        return {
+            "success": True,
+            "data": {
+                "incidents": incidents,
+                "total_count": len(incidents),
+                "status_filter": status or "all"
+            },
+            "query_info": {
+                "user_id": user_id,
+                "query_type": "incidents",
+                "status_filter": status
+            }
+        }
+    
+    except Exception as e:
+        print(f"Error in get_user_incidents: {str(e)}")
+        return {"error": f"Failed to get user incidents: {str(e)}"}
 
 #---------------------------------------
 # Function definitions for OpenAI function calling
@@ -707,414 +1112,161 @@ def get_flow_data(system_id: str, jwt_token: str = None) -> Dict[str, Any]:
         print(f"Error getting flow data for system {system_id}: {str(e)}")
         return {"error": f"Failed to get flow data: {str(e)}"}
 
-def determine_api_date_format(time_period: str, start_date: str, end_date: str) -> tuple:
-    """
-    Determine the appropriate API date format based on the requested time_period.
-    
-    Smart Granularity Logic:
-    - yearly: Request monthly data points (YYYY-MM format)
-    - monthly: Request daily data points (YYYY-MM-DD format) 
-    - weekly: Request daily data points (YYYY-MM-DD format)
-    - daily: Request daily data points (YYYY-MM-DD format)
-    
-    Args:
-        time_period: "yearly", "monthly", "weekly", "daily"
-        start_date: Original start date from user request
-        end_date: Original end date from user request
-        
-    Returns:
-        Tuple of (api_start_date, api_end_date) in appropriate format
-    """
-    logger.info(f"=== DETERMINE_API_DATE_FORMAT ===")
-    logger.info(f"Input - time_period: {time_period}, start_date: {start_date}, end_date: {end_date}")
-    
-    try:
-        if time_period == "yearly":
-            # For yearly charts, request monthly data points
-            # Convert dates to YYYY-MM format to get monthly aggregations
-            if len(start_date) == 4:  # YYYY
-                api_start_date = f"{start_date}-01"  # January of that year
-                api_end_date = f"{start_date}-12"    # December of that year
-            elif len(start_date) == 7:  # YYYY-MM
-                api_start_date = start_date
-                api_end_date = end_date if end_date else start_date
-            elif len(start_date) == 10:  # YYYY-MM-DD
-                # Extract year and get full year range
-                year = start_date[:4]
-                api_start_date = f"{year}-01"
-                api_end_date = f"{year}-12"
-            else:
-                api_start_date = start_date
-                api_end_date = end_date
-                
-        elif time_period in ["monthly", "weekly", "daily"]:
-            # For monthly/weekly/daily charts, request daily data points
-            # Convert dates to YYYY-MM-DD format to get daily granularity
-            if len(start_date) == 4:  # YYYY
-                api_start_date = f"{start_date}-01-01"  # January 1st of that year
-                api_end_date = f"{start_date}-12-31"    # December 31st of that year
-            elif len(start_date) == 7:  # YYYY-MM
-                # Get all days in that month
-                year, month = start_date.split('-')
-                api_start_date = f"{start_date}-01"  # First day of month
-                # Calculate last day of month
-                if month in ['01', '03', '05', '07', '08', '10', '12']:
-                    last_day = '31'
-                elif month in ['04', '06', '09', '11']:
-                    last_day = '30'
-                else:  # February
-                    # Simple leap year check
-                    year_int = int(year)
-                    if year_int % 4 == 0 and (year_int % 100 != 0 or year_int % 400 == 0):
-                        last_day = '29'
-                    else:
-                        last_day = '28'
-                api_end_date = f"{start_date}-{last_day}"
-            elif len(start_date) == 10:  # YYYY-MM-DD
-                api_start_date = start_date
-                api_end_date = end_date if end_date else start_date
-            else:
-                api_start_date = start_date
-                api_end_date = end_date
-        else:
-            # Fallback - use original dates
-            api_start_date = start_date
-            api_end_date = end_date
-            
-    except Exception as e:
-        logger.error(f"Error in determine_api_date_format: {str(e)}")
-        # Fallback to original dates
-        api_start_date = start_date
-        api_end_date = end_date
-    
-    logger.info(f"Output - api_start_date: {api_start_date}, api_end_date: {api_end_date}")
-    return api_start_date, api_end_date
+# Note: determine_api_date_format function removed - LLM now handles API format optimization
 
 
-def aggregate_data_points(raw_data_points: list, time_period: str, data_type: str) -> list:
-    """
-    Aggregate and format data points based on the requested time_period.
-    
-    Args:
-        raw_data_points: List of data points from API
-        time_period: "yearly", "monthly", "weekly", "daily"
-        data_type: "energy_production", "co2_savings", "earnings"
-        
-    Returns:
-        List of formatted chart data points with appropriate aggregation
-    """
-    logger.info(f"=== AGGREGATE_DATA_POINTS ===")
-    logger.info(f"Input - {len(raw_data_points)} raw points, time_period: {time_period}, data_type: {data_type}")
-    
-    if not raw_data_points:
-        logger.warning("No raw data points to aggregate")
-        return []
-        
-    chart_data_points = []
-    
-    try:
-        if time_period == "yearly":
-            # For yearly view, group by month and show monthly totals
-            monthly_totals = {}
-            
-            for data_point in raw_data_points:
-                date_str = data_point.get('date', '')
-                value = get_data_point_value(data_point, data_type)
-                
-                # Extract year-month from date
-                if len(date_str) >= 7:  # YYYY-MM or YYYY-MM-DD
-                    year_month = date_str[:7]  # YYYY-MM
-                    if year_month not in monthly_totals:
-                        monthly_totals[year_month] = 0
-                    monthly_totals[year_month] += value
-            
-            # Convert monthly totals to chart points
-            for year_month in sorted(monthly_totals.keys()):
-                try:
-                    date_obj = datetime.strptime(year_month, "%Y-%m")
-                    x_label = date_obj.strftime("%b")  # "Jan", "Mar", "May" (without year)
-                    chart_data_points.append({
-                        "x": x_label,
-                        "y": round(monthly_totals[year_month], 2)
-                    })
-                except ValueError:
-                    # Fallback if date parsing fails
-                    chart_data_points.append({
-                        "x": year_month,
-                        "y": round(monthly_totals[year_month], 2)
-                    })
-                    
-        elif time_period == "monthly":
-            # For monthly view, show data grouped by 3-day periods (max ~10 points instead of ~30)
-            three_day_totals = {}
-            
-            for data_point in raw_data_points:
-                date_str = data_point.get('date', '')
-                value = get_data_point_value(data_point, data_type)
-                
-                # Group by 3-day periods
-                try:
-                    if len(date_str) >= 10:  # YYYY-MM-DD
-                        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                        # Group into 3-day periods: 1-3, 4-6, 7-9, 10-12, etc.
-                        day_of_month = date_obj.day
-                        period_start = ((day_of_month - 1) // 3) * 3 + 1
-                        period_end = min(period_start + 2, 31)  # Don't exceed month end
-                        
-                        # Create period key like "01-03", "04-06", etc.
-                        period_key = f"{period_start:02d}-{period_end:02d}"
-                        
-                        if period_key not in three_day_totals:
-                            three_day_totals[period_key] = 0
-                        three_day_totals[period_key] += value
-                    else:
-                        # Fallback for non-standard date format
-                        if date_str not in three_day_totals:
-                            three_day_totals[date_str] = 0
-                        three_day_totals[date_str] += value
-                        
-                except ValueError:
-                    # Fallback for date parsing errors
-                    if date_str not in three_day_totals:
-                        three_day_totals[date_str] = 0
-                    three_day_totals[date_str] += value
-            
-            # Convert 3-day totals to chart points
-            for period_key in sorted(three_day_totals.keys()):
-                chart_data_points.append({
-                    "x": period_key,
-                    "y": round(three_day_totals[period_key], 2)
-                })
-                
-        elif time_period == "weekly":
-            # For weekly view, show daily values with day names
-            for data_point in raw_data_points:
-                date_str = data_point.get('date', '')
-                value = get_data_point_value(data_point, data_type)
-                
-                # Format as day of week
-                try:
-                    if len(date_str) >= 10:  # YYYY-MM-DD
-                        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                        x_label = date_obj.strftime("%a")  # "Mon", "Tue", etc.
-                    else:
-                        x_label = date_str
-                except ValueError:
-                    x_label = date_str
-                    
-                chart_data_points.append({
-                    "x": x_label,
-                    "y": round(value, 2)
-                })
-                
-        else:  # daily
-            # For daily view, show daily values
-            for data_point in raw_data_points:
-                date_str = data_point.get('date', '')
-                value = get_data_point_value(data_point, data_type)
-                
-                # Format as MM/DD
-                try:
-                    if len(date_str) >= 10:  # YYYY-MM-DD
-                        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                        x_label = date_obj.strftime("%m/%d")
-                    else:
-                        x_label = date_str
-                except ValueError:
-                    x_label = date_str
-                    
-                chart_data_points.append({
-                    "x": x_label,
-                    "y": round(value, 2)
-                })
-        
-        # Log first few entries for debugging
-        for i, point in enumerate(chart_data_points[:5]):
-            logger.info(f"  Chart point {i+1}: {point['x']} = {point['y']}")
-            
-    except Exception as e:
-        logger.error(f"Error in aggregate_data_points: {str(e)}")
-        # Fallback - return raw data with basic formatting
-        for data_point in raw_data_points:
-            date_str = data_point.get('date', '')
-            value = get_data_point_value(data_point, data_type)
-            chart_data_points.append({
-                "x": date_str,
-                "y": round(value, 2)
-            })
-    
-    logger.info(f"Output - {len(chart_data_points)} aggregated chart points")
-    return chart_data_points
+# Note: aggregate_data_points function removed - LLM chooses optimal API format, API returns pre-aggregated data
 
 
-def get_data_point_value(data_point: dict, data_type: str) -> float:
-    """
-    Extract the appropriate value from a data point based on data_type.
-    
-    Args:
-        data_point: Individual data point from API
-        data_type: "energy_production", "co2_savings", "earnings"
-        
-    Returns:
-        Float value for the chart
-    """
-    if data_type == "energy_production":
-        value = float(data_point.get('energy_kwh', 0))
-    elif data_type == "earnings":
-        value = float(data_point.get('energy_kwh', 0)) * 0.40  # Convert to earnings
-    elif data_type == "co2_savings":
-        value = float(data_point.get('co2_kg', 0))
-    else:
-        # Fallback
-        value = float(data_point.get('energy_kwh', 0))
-    
-    return value
+# Note: get_data_point_value function removed - simplified data processing in generate_chart_data
 
 
 def generate_chart_data(
     data_type: str,
     system_id: str,
-    time_period: str,
     start_date: str,
-    end_date: str = None,
+    end_date: str,
+    time_period: str = "custom",
     jwt_token: str = None
 ) -> Dict[str, Any]:
     """
-    Generate chart data for visualization based on user request.
+    Generate chart data for visualization with LLM-optimized API calls.
     
     Args:
         data_type: "energy_production", "co2_savings", "earnings"
         system_id: The solar system ID
-        time_period: "yearly", "monthly", "weekly", "daily"
-        start_date: Start date in appropriate format
-        end_date: End date (optional, defaults to start_date)
+        start_date: Start date in YYYY, YYYY-MM, or YYYY-MM-DD format (LLM optimized)
+        end_date: End date in same format as start_date
+        time_period: Descriptive label for chart type determination
         jwt_token: JWT token for authentication
     
     Returns:
         ChartData formatted for frontend visualization
     """
-    logger.info(f"=== GENERATE_CHART_DATA START ===")
+    logger.info(f"=== GENERATE_CHART_DATA (LLM Enhanced) START ===")
     logger.info(f"Parameters received:")
     logger.info(f"  - data_type: {data_type}")
     logger.info(f"  - system_id: {system_id}")
-    logger.info(f"  - time_period: {time_period}")
     logger.info(f"  - start_date: {start_date}")
     logger.info(f"  - end_date: {end_date}")
+    logger.info(f"  - time_period: {time_period}")
     logger.info(f"  - jwt_token: {'[PROVIDED]' if jwt_token else '[NOT PROVIDED]'}")
     
     try:
-        if not end_date:
-            end_date = start_date
-            logger.info(f"No end_date provided, using start_date: {end_date}")
-            
-        # SMART GRANULARITY LOGIC - Determine API date format based on requested time_period
-        api_start_date, api_end_date = determine_api_date_format(time_period, start_date, end_date)
-        logger.info(f"Smart granularity - API dates: {api_start_date} to {api_end_date}")
-            
         # Get system profile for name
         system_name = "Solar System"
         try:
-            logger.info(f"Fetching system profile for system_id: {system_id}")
             profile_response = table.get_item(
                 Key={'PK': f'System#{system_id}', 'SK': 'PROFILE'}
             )
             if 'Item' in profile_response:
                 system_name = profile_response['Item'].get('name', f"System {system_id}")
                 logger.info(f"System profile found - name: {system_name}")
-            else:
-                logger.warning(f"No system profile found for system_id: {system_id}")
         except Exception as e:
             logger.error(f"Error fetching system profile: {str(e)}")
         
-        # Determine data granularity and fetch method
-        chart_data_points = []
+        # Direct API call with LLM-optimized dates (no format conversion)
+        raw_data = None
         total_value = 0
         unit = ""
         
-        logger.info(f"Processing data_type: {data_type}")
+        logger.info(f"Making direct API call with dates: {start_date} to {end_date}")
         
         if data_type in ["energy_production", "earnings"]:
-            logger.info(f"Fetching energy production data with smart granularity...")
-            # Get energy production data with appropriate granularity
-            energy_data = get_energy_production(system_id, api_start_date, api_end_date, jwt_token)
+            raw_data = get_energy_production(system_id, start_date, end_date, jwt_token)
             
-            logger.info(f"Energy data response keys: {list(energy_data.keys()) if isinstance(energy_data, dict) else 'Not a dict'}")
+            if "error" in raw_data:
+                logger.error(f"Error in energy data: {raw_data['error']}")
+                return {"error": raw_data["error"]}
             
-            if "error" in energy_data:
-                logger.error(f"Error in energy data: {energy_data['error']}")
-                return {"error": energy_data["error"]}
-            
-            logger.info(f"Processing chart data for time_period: {time_period}")
-            
-            # Process data points based on time period with smart aggregation
-            raw_data_points = energy_data.get('data_points', [])
-            logger.info(f"Found {len(raw_data_points)} raw data points")
-            
-            # Apply smart aggregation based on time_period
-            chart_data_points = aggregate_data_points(raw_data_points, time_period, data_type)
-            logger.info(f"After smart aggregation: {len(chart_data_points)} chart data points")
-            
-            total_value = float(energy_data.get('total_energy_kwh', 0))
+            total_value = float(raw_data.get('total_energy_kwh', 0))
             if data_type == "earnings":
                 total_value = total_value * 0.40
                 unit = "$"
-                logger.info(f"Calculated earnings total_value: {total_value}")
-        else:
+            else:
                 unit = "kWh"
-                logger.info(f"Energy production total_value: {total_value}")
                 
         elif data_type == "co2_savings":
-            logger.info(f"Fetching CO2 savings data with smart granularity...")
-            # Get CO2 savings data with appropriate granularity
-            co2_data = get_co2_savings(system_id, api_start_date, api_end_date, jwt_token)
+            raw_data = get_co2_savings(system_id, start_date, end_date, jwt_token)
             
-            logger.info(f"CO2 data response keys: {list(co2_data.keys()) if isinstance(co2_data, dict) else 'Not a dict'}")
+            if "error" in raw_data:
+                logger.error(f"Error in CO2 data: {raw_data['error']}")
+                return {"error": raw_data["error"]}
             
-            if "error" in co2_data:
-                logger.error(f"Error in CO2 data: {co2_data['error']}")
-                return {"error": co2_data["error"]}
-            
-            logger.info(f"Processing CO2 chart data for time_period: {time_period}")
-            
-            # Process CO2 data points with smart aggregation
-            raw_data_points = co2_data.get('data_points', [])
-            logger.info(f"Found {len(raw_data_points)} CO2 raw data points")
-            
-            # Apply smart aggregation based on time_period
-            chart_data_points = aggregate_data_points(raw_data_points, time_period, data_type)
-            logger.info(f"After smart aggregation: {len(chart_data_points)} CO2 chart data points")
-            
-            total_value = float(co2_data.get('total_co2_kg', 0))
+            total_value = float(raw_data.get('total_co2_kg', 0))
             unit = "kg CO2"
-            logger.info(f"CO2 savings total_value: {total_value}")
         
-        # Generate appropriate title
-        # Detect date format and parse accordingly
-        try:
-            if len(start_date) == 4:  # YYYY format
-                period_text = f"Year {start_date}"
-            elif len(start_date) == 7:  # YYYY-MM format
-                period_text = datetime.strptime(start_date, "%Y-%m").strftime("%B %Y")
-            elif len(start_date) == 10:  # YYYY-MM-DD format
-                if time_period == "daily":
-                    period_text = datetime.strptime(start_date, "%Y-%m-%d").strftime("%B %d, %Y")
-                elif time_period == "weekly":
-                    period_text = f"Week of {datetime.strptime(start_date, '%Y-%m-%d').strftime('%B %d, %Y')}"
-                else:
-                    # For monthly/yearly periods with daily dates, show the range
-                    if end_date and end_date != start_date:
-                        start_formatted = datetime.strptime(start_date, "%Y-%m-%d").strftime("%B %d")
-                        end_formatted = datetime.strptime(end_date, "%Y-%m-%d").strftime("%B %d, %Y")
-                        period_text = f"{start_formatted} - {end_formatted}"
-                    else:
-                        period_text = datetime.strptime(start_date, "%Y-%m-%d").strftime("%B %d, %Y")
+        # Simple data points formatting (API returns pre-aggregated data)
+        raw_data_points = raw_data.get('data_points', [])
+        chart_data_points = []
+        
+        for data_point in raw_data_points:
+            date_str = data_point.get('date', '')
+            
+            # Simple value extraction
+            if data_type == "energy_production":
+                value = float(data_point.get('energy_kwh', 0))
+            elif data_type == "earnings":
+                value = float(data_point.get('energy_kwh', 0)) * 0.40
+            elif data_type == "co2_savings":
+                value = float(data_point.get('co2_kg', 0))
             else:
-                # Fallback to original start_date if format is unexpected
-                period_text = start_date
-        except ValueError as e:
-            logger.warning(f"Date parsing failed for start_date '{start_date}': {e}")
-            period_text = start_date  # Fallback to raw date string
+                value = 0
+            
+            # Simple date formatting for x-axis
+            try:
+                if len(date_str) == 4:  # YYYY
+                    x_label = date_str
+                elif len(date_str) == 7:  # YYYY-MM
+                    date_obj = datetime.strptime(date_str, "%Y-%m")
+                    x_label = date_obj.strftime("%b %Y")
+                elif len(date_str) >= 10:  # YYYY-MM-DD
+                    date_obj = datetime.strptime(date_str[:10], "%Y-%m-%d")
+                    x_label = date_obj.strftime("%m/%d")
+                else:
+                    x_label = date_str
+            except ValueError:
+                x_label = date_str
+                
+            chart_data_points.append({
+                "x": x_label,
+                "y": round(value, 2)
+            })
         
+        # Simple chart type determination based on date format
+        if len(start_date) == 4:  # Yearly format
+            chart_type = "bar"
+            period_text = f"Years {start_date}-{end_date}" if start_date != end_date else f"Year {start_date}"
+        elif len(start_date) == 7:  # Monthly format  
+            chart_type = "bar"
+            try:
+                start_formatted = datetime.strptime(start_date, "%Y-%m").strftime("%B %Y")
+                if start_date != end_date:
+                    end_formatted = datetime.strptime(end_date, "%Y-%m").strftime("%B %Y")
+                    period_text = f"{start_formatted} - {end_formatted}"
+                else:
+                    period_text = start_formatted
+            except ValueError:
+                period_text = f"{start_date} - {end_date}" if start_date != end_date else start_date
+        else:  # Daily format
+            try:
+                start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                days_diff = (end_dt - start_dt).days + 1
+                
+                chart_type = "line" if days_diff <= 30 else "bar"
+                
+                if days_diff == 1:
+                    period_text = start_dt.strftime("%B %d, %Y")
+                else:
+                    start_formatted = start_dt.strftime("%B %d")
+                    end_formatted = end_dt.strftime("%B %d, %Y")
+                    period_text = f"{start_formatted} - {end_formatted}"
+            except ValueError:
+                chart_type = "bar"
+                period_text = f"{start_date} - {end_date}"
+        
+        # Generate title
         data_type_text = {
             "energy_production": "Energy Production",
             "co2_savings": "CO2 Savings",
@@ -1123,12 +1275,9 @@ def generate_chart_data(
         
         title = f"{data_type_text} - {period_text}"
         
-        logger.info(f"Generated chart title: {title}")
-        logger.info(f"Chart data points count: {len(chart_data_points)}")
-        
-        # Create chart data
+        # Create simplified chart data
         chart_data = {
-            "chart_type": "line",
+            "chart_type": chart_type,
             "data_type": data_type,
             "title": title,
             "x_axis_label": "Time Period",
@@ -1140,20 +1289,8 @@ def generate_chart_data(
             "system_name": system_name
         }
         
-        logger.info(f"Final chart_data structure:")
-        logger.info(f"  - chart_type: {chart_data['chart_type']}")
-        logger.info(f"  - data_type: {chart_data['data_type']}")
-        logger.info(f"  - title: {chart_data['title']}")
-        logger.info(f"  - data_points count: {len(chart_data['data_points'])}")
-        logger.info(f"  - total_value: {chart_data['total_value']}")
-        logger.info(f"  - unit: {chart_data['unit']}")
-        logger.info(f"  - system_name: {chart_data['system_name']}")
-        
-        if len(chart_data_points) > 0:
-            logger.info(f"Sample data points (first 3):")
-            for i, point in enumerate(chart_data_points[:3]):
-                logger.info(f"  Point {i+1}: x='{point['x']}', y={point['y']}")
-        
+        logger.info(f"Generated chart with {len(chart_data_points)} points, total: {total_value} {unit}")
+        logger.info(f"Chart type: {chart_type}, Title: {title}")
         logger.info(f"=== GENERATE_CHART_DATA SUCCESS ===")
         return chart_data
         
@@ -1244,8 +1381,90 @@ def get_co2_savings_description():
         "- 'What were my CO2 savings from April to June 2023?' → start_date='2023-04', end_date='2023-06'"
     )
 
-# Function to update function specs with current dates
-FUNCTION_SPECS =  [
+# Function specifications with strategic ordering and detailed descriptions
+FUNCTION_SPECS = [
+        # HIGH PRIORITY: Direct user/system queries (most common)
+        {
+            "type": "function",
+            "function": {
+                "name": "get_user_information",
+                "description": (
+                    "Get user information from the DynamoDB database. Use this for questions about the user's profile or accessible systems.\n\n"
+                    "SPECIFIC QUESTION EXAMPLES:\n"
+                    "- 'What systems do I have access to?'\n"
+                    "- 'What's my email address?'\n"
+                    "- 'What's my name?'\n"
+                    "- 'What's my role?'\n"
+                    "- 'Who is my technician?'\n"
+                    "- 'Show me my profile information'\n"
+                    "- 'What systems am I linked to?'\n"
+                    "- 'How many systems do I have?'\n\n"
+                    "DATA_TYPE OPTIONS:\n"
+                    "- 'profile': Returns complete user profile with all available fields\n"
+                    "- 'systems': Returns all accessible systems with full system information\n\n"
+                    "RESPONSE FORMAT:\n"
+                    "Returns complete structured data - the LLM will extract specific information as needed."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "user_id": {
+                            "type": "string",
+                            "description": "The user ID to get information for"
+                        },
+                        "data_type": {
+                            "type": "string",
+                            "description": "Type of information to retrieve: 'profile' or 'systems'"
+                        }
+                    },
+                    "required": ["user_id", "data_type"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_system_information",
+                "description": (
+                    "Get system information from the DynamoDB database. Use this for questions about specific system details, status, or configuration.\n\n"
+                    "SPECIFIC QUESTION EXAMPLES:\n"
+                    "- 'Where is my system located?'\n"
+                    "- 'What's the address of my system?'\n"
+                    "- 'How big is my system?'\n"
+                    "- 'What's the AC power of my system?'\n"
+                    "- 'What's the DC capacity of my system?'\n"
+                    "- 'What's the status of my system?'\n"
+                    "- 'When was my system installed?'\n"
+                    "- 'How many inverters does my system have?'\n"
+                    "- 'What's my system's name?'\n"
+                    "- 'Show me my system profile'\n\n"
+                    "DATA_TYPE OPTIONS:\n"
+                    "- 'profile': Returns complete system profile with all configuration details\n"
+                    "- 'status': Returns system status information including inverter counts\n"
+                    "- 'inverter_count': Returns count of inverters for this system\n\n"
+                    "RESPONSE FORMAT:\n"
+                    "Returns complete structured data - the LLM will extract specific information as needed."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "user_id": {
+                            "type": "string",
+                            "description": "The user ID requesting the information"
+                        },
+                        "system_id": {
+                            "type": "string",
+                            "description": "The system ID to get information for"
+                        },
+                        "data_type": {
+                            "type": "string",
+                            "description": "Type of information to retrieve: 'profile', 'status', or 'inverter_count'"
+                        }
+                    },
+                    "required": ["user_id", "system_id", "data_type"]
+                }
+            }
+        },
         {
             "type": "function",
             "function": {
@@ -1276,6 +1495,7 @@ FUNCTION_SPECS =  [
                 }
             }
         },
+        # MEDIUM PRIORITY: Energy/data queries
         {
             "type": "function",
             "function": {
@@ -1354,23 +1574,115 @@ FUNCTION_SPECS =  [
                 }
             }
         },
+        # LOWER PRIORITY: Technical details and specialized queries
+        {
+            "type": "function",
+            "function": {
+                "name": "get_inverter_information",
+                "description": (
+                    "Get inverter information from the DynamoDB database. Use this for questions about specific inverter details or status.\n\n"
+                    "SPECIFIC QUESTION EXAMPLES:\n"
+                    "- 'What inverters do I have?'\n"
+                    "- 'What's the status of my inverters?'\n"
+                    "- 'How many MPPT trackers do I have?'\n"
+                    "- 'Show me my inverter details'\n"
+                    "- 'What's the power rating of my inverters?'\n"
+                    "- 'Are my inverters online?'\n"
+                    "- 'What's my inverter model?'\n"
+                    "- 'Show me inverter firmware versions'\n\n"
+                    "DATA_TYPE OPTIONS:\n"
+                    "- 'profiles': Returns complete inverter profiles with all technical details\n"
+                    "- 'status': Returns inverter status information\n"
+                    "- 'details': Returns combined profile and status information\n\n"
+                    "RESPONSE FORMAT:\n"
+                    "Returns complete structured data - the LLM will extract specific information as needed."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "user_id": {
+                            "type": "string",
+                            "description": "The user ID requesting the information"
+                        },
+                        "system_id": {
+                            "type": "string",
+                            "description": "The system ID to get inverters for"
+                        },
+                        "data_type": {
+                            "type": "string",
+                            "description": "Type of information to retrieve: 'profiles', 'status', or 'details'"
+                        }
+                    },
+                    "required": ["user_id", "system_id", "data_type"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_user_incidents",
+                "description": (
+                    "Get user incident information from the DynamoDB database. Use this for questions about incidents, alerts, or system issues.\n\n"
+                    "SPECIFIC QUESTION EXAMPLES:\n"
+                    "- 'What incidents do I have?'\n"
+                    "- 'Show me my recent incidents'\n"
+                    "- 'Do I have any pending incidents?'\n"
+                    "- 'What's my incident history?'\n"
+                    "- 'Show me processed incidents'\n"
+                    "- 'How many incidents do I have?'\n"
+                    "- 'What alerts do I have?'\n"
+                    "- 'Show me my system issues'\n"
+                    "- 'Any problems with my system?'\n"
+                    "- 'What's my incident status?'\n\n"
+                    "AVAILABLE DATA FIELDS:\n"
+                    "Incident: status, systemId, deviceId, userId, processedAt, expiresAt, incident details\n\n"
+                    "STATUS OPTIONS:\n"
+                    "- 'pending': Shows only pending incidents\n"
+                    "- 'processed': Shows only processed incidents\n"
+                    "- Leave empty or null: Shows all incidents\n\n"
+                    "RESPONSE FORMAT:\n"
+                    "Returns structured data with incidents array, total count, status filter, and query_info for tracking."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "user_id": {
+                            "type": "string",
+                            "description": "The user ID to get incidents for"
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "Optional status filter: 'pending', 'processed', or leave empty for all incidents",
+                            "default": ""
+                        }
+                    },
+                    "required": ["user_id"]
+                }
+            }
+        },
         {
             "type": "function",
             "function": {
                 "name": "generate_chart_data",
                 "description": (
-                    "Generate chart data for visualization when user asks to 'show', 'display', 'graph', 'chart', or 'visualize' data. "
-                    "Use this for requests like:\n"
-                    "- 'Show me production for 2023'\n"
-                    "- 'Display my CO2 savings this year'\n"
-                    "- 'Chart my earnings last month'\n"
-                    "- 'Graph weekly production data'\n\n"
-                    "Smart time period handling:\n"
-                    "- 'show yearly data' → get monthly data points for that year\n"
-                    "- 'show monthly data' → get daily data points for that month\n"
-                    "- 'show weekly data' → get daily data points for that week\n"
-                    "- 'show daily data' → get hourly data points for that day\n\n"
-                    "Always convert relative terms to actual dates before calling."
+                    "Generate chart data for visualization when user asks to 'show', 'display', 'graph', 'chart', or 'visualize' data.\n\n"
+                    "SOLAR.WEB API FORMAT OPTIMIZATION:\n"
+                    "The Solar.web API supports different aggregation levels. Choose the optimal format:\n\n"
+                    "YEARLY FORMAT (YYYY): Use for multi-year requests\n"
+                    "- 'last 2 years' → start_date='2023', end_date='2024'\n"
+                    "- '2020 to 2023' → start_date='2020', end_date='2023'\n"
+                    "- Returns pre-aggregated yearly totals, use bar chart\n\n"
+                    "MONTHLY FORMAT (YYYY-MM): Use for monthly trends, quarters, year-parts\n"
+                    "- 'first 6 months of 2025' → start_date='2025-01', end_date='2025-06'\n" 
+                    "- 'Q1 2024' → start_date='2024-01', end_date='2024-03'\n"
+                    "- 'last 8 months' → start_date='2024-04', end_date='2024-12'\n"
+                    "- Returns pre-aggregated monthly totals, use bar chart\n\n"
+                    "DAILY FORMAT (YYYY-MM-DD): Use for daily/weekly trends, short periods\n"
+                    "- 'last 14 days' → start_date='2024-12-03', end_date='2024-12-17'\n"
+                    "- 'this week' → start_date='2024-12-16', end_date='2024-12-22'\n"
+                    "- 'December 1-15' → start_date='2024-12-01', end_date='2024-12-15'\n"
+                    "- Returns daily data points, use line chart for ≤30 days, bar chart for >30 days\n\n"
+                    "IMPORTANT: start_date and end_date MUST use the SAME format (both YYYY, both YYYY-MM, or both YYYY-MM-DD)"
                 ),
                 "parameters": {
                     "type": "object",
@@ -1378,28 +1690,26 @@ FUNCTION_SPECS =  [
                         "data_type": {
                             "type": "string",
                             "enum": ["energy_production", "co2_savings", "earnings"],
-                            "description": "Type of data to chart: energy_production, co2_savings, or earnings"
+                            "description": "Type of data to chart"
                         },
                         "system_id": {
                             "type": "string",
                             "description": "The ID of the system to get data for"
                         },
-                        "time_period": {
-                            "type": "string",
-                            "enum": ["yearly", "monthly", "weekly", "daily"],
-                            "description": "Time period granularity for the chart"
-                        },
                         "start_date": {
                             "type": "string",
-                            "description": "Start date in YYYY, YYYY-MM, or YYYY-MM-DD format. Must convert relative terms to actual dates."
+                            "description": "Start date in YYYY, YYYY-MM, or YYYY-MM-DD format based on optimal API aggregation level"
                         },
                         "end_date": {
                             "type": "string",
-                            "description": "End date in same format as start_date. Optional, defaults to start_date.",
-                            "default": ""
+                            "description": "End date in same format as start_date"
+                        },
+                        "time_period": {
+                            "type": "string",
+                            "description": "Descriptive label for the chart (e.g., 'last_14_days', 'Q1_2024', 'yearly_trend') to help determine chart type"
                         }
                     },
-                    "required": ["data_type", "system_id", "time_period", "start_date"]
+                    "required": ["data_type", "system_id", "start_date", "end_date", "time_period"]
                 }
             }
         }
@@ -1411,7 +1721,11 @@ FUNCTION_MAP = {
     "get_energy_production": get_energy_production,
     "get_co2_savings": get_co2_savings,
     "get_flow_data": get_flow_data,
-    "generate_chart_data": generate_chart_data
+    "generate_chart_data": generate_chart_data,
+    "get_user_information": get_user_information,
+    "get_system_information": get_system_information,
+    "get_inverter_information": get_inverter_information,
+    "get_user_incidents": get_user_incidents
 }
 
 #---------------------------------------
@@ -1516,6 +1830,15 @@ class SolarAssistantRAG:
         # Add system message with current date and specific date ranges
         system_message = f"""You are a solar operations and maintenance expert specialized in Fronius inverters, and you work closely with the Lac des Mille Lacs First Nation (LDMLFN) community.
         
+        IMPORTANT: You ONLY discuss solar energy topics. For any non-solar questions, respond: "I'm a solar energy specialist and can only help with solar systems, energy production, inverters, and maintenance. What can I help you with regarding your solar system?"
+
+        SOLAR TOPICS ONLY: energy production, inverters, system status, maintenance, CO2 savings, earnings, troubleshooting, solar technology.
+
+        EXAMPLE RESPONSES FOR OFF-TOPIC QUESTIONS:
+        - "What's the weather like?" → "I'm a solar energy specialist and can only help with solar systems, energy production, inverters, and maintenance. However, I can tell you how weather affects your solar production if that would be helpful!"
+        - "How do I cook pasta?" → "I'm a solar energy specialist and can only help with solar systems, energy production, inverters, and maintenance. Is there anything about your solar system I can help you with instead?"
+        - "Tell me a joke" → "I'm a solar energy specialist focused on helping with solar systems and energy production. Is there anything about your solar system performance or maintenance I can assist with?"
+        
         USER INFORMATION:
         - The user's name is {username}. If they ask about their name, greet them personally.
         - When appropriate, address them by name for a more personalized experience.
@@ -1533,10 +1856,31 @@ class SolarAssistantRAG:
         - When users ask to "show", "display", "graph", "chart", or "visualize" data, AUTOMATICALLY use the generate_chart_data function
         - IMPORTANT: Do NOT ask for permission - generate the chart immediately when users use these keywords
         - Keywords that trigger automatic chart generation: "show me", "display", "graph", "chart", "visualize", "plot"
-        - Examples: "show me production for 2023", "display CO2 savings this year", "chart my earnings"
         - Always provide a helpful text summary along with the chart data
         - For chart requests, be descriptive about what the chart will show
         - The chart will be automatically rendered by the frontend when chart_data is provided
+        
+        SOLAR.WEB API FORMAT OPTIMIZATION:
+        Choose the optimal API format based on the user's request:
+        
+        YEARLY FORMAT (YYYY): Use for multi-year requests
+        - "last 2 years" → start_date="2023", end_date="2024"
+        - "2020 to 2023" → start_date="2020", end_date="2023"
+        - "yearly trends" → Use yearly format for the requested period
+        
+        MONTHLY FORMAT (YYYY-MM): Use for monthly trends, quarters, year-parts
+        - "first 6 months of 2025" → start_date="2025-01", end_date="2025-06"
+        - "Q1 2024" → start_date="2024-01", end_date="2024-03"
+        - "last 8 months" → start_date="2024-04", end_date="2024-12"
+        - "March to August" → start_date="2024-03", end_date="2024-08"
+        
+        DAILY FORMAT (YYYY-MM-DD): Use for daily/weekly trends, short periods
+        - "last 14 days" → start_date="2024-12-03", end_date="2024-12-17"
+        - "this week" → start_date="2024-12-16", end_date="2024-12-22"
+        - "December 1-15" → start_date="2024-12-01", end_date="2024-12-15"
+        - "yesterday" → start_date="2024-12-16", end_date="2024-12-16"
+        
+        CRITICAL: start_date and end_date MUST use the SAME format (both YYYY, both YYYY-MM, or both YYYY-MM-DD)
         
         DATA HANDLING:
         - The API responses now include pre-calculated total values that you should use directly.
@@ -1603,69 +1947,91 @@ class SolarAssistantRAG:
             
             response_message = response.choices[0].message
             
-            # Check if the model wants to call a function
-            source_documents = []
-            chart_data = None
-            if response_message.tool_calls:
-                # Extract function calls
-                messages.append({
-                    "role": "assistant",
-                    "tool_calls": response_message.tool_calls
-                    })
+                    # Check if the model wants to call a function
+        source_documents = []
+        chart_data = None
+        dynamodb_queries = []
+        if response_message.tool_calls:
+            # Extract function calls
+            messages.append({
+                "role": "assistant",
+                "tool_calls": response_message.tool_calls
+                })
+            
+            # Process each function call
+            tool_responses = []
+            for tool_call in response_message.tool_calls:
+                function_name = tool_call.function.name
+                function_args = json.loads(tool_call.function.arguments)
                 
-                # Process each function call
-                tool_responses = []
-                for tool_call in response_message.tool_calls:
-                    function_name = tool_call.function.name
-                    function_args = json.loads(tool_call.function.arguments)
+                # Override system_id with the one provided in the request, if applicable
+                if system_id and function_name in ["get_energy_production", "get_co2_savings", "get_flow_data", "generate_chart_data"]:
+                    function_args["system_id"] = system_id
+                    function_args["jwt_token"] = jwt_token  # Add JWT token to function args
+                
+                # For DynamoDB functions, add user_id if not present
+                if function_name in ["get_user_information", "get_system_information", "get_inverter_information", "get_user_incidents"]:
+                    if "user_id" not in function_args:
+                        # Extract base user_id from the combined user_id
+                        base_user_id = user_id.split('_')[0] if user_id and '_' in user_id else user_id
+                        function_args["user_id"] = base_user_id
                     
-                    # Override system_id with the one provided in the request, if applicable
-                    if system_id and function_name in ["get_energy_production", "get_co2_savings", "get_flow_data", "generate_chart_data"]:
+                    # For system-related functions, add system_id if available
+                    if function_name in ["get_system_information", "get_inverter_information"] and system_id:
                         function_args["system_id"] = system_id
-                        function_args["jwt_token"] = jwt_token  # Add JWT token to function args
+                
+                print(f"Calling function: {function_name} with args: {function_args}")
+                
+                # Execute the function
+                function_to_call = FUNCTION_MAP.get(function_name)
+                if function_to_call:
+                    function_response = function_to_call(**function_args)
+                    tool_responses.append({
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": json.dumps(function_response)
+                    })
                     
-                    print(f"Calling function: {function_name} with args: {function_args}")
+                    # Save source documents for RAG queries
+                    if function_name == "search_vector_db" and isinstance(function_response, list):
+                        source_documents = function_response
                     
-                    # Execute the function
-                    function_to_call = FUNCTION_MAP.get(function_name)
-                    if function_to_call:
-                        function_response = function_to_call(**function_args)
-                        tool_responses.append({
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "name": function_name,
-                            "content": json.dumps(function_response)
+                    # Save chart data for visualization
+                    if function_name == "generate_chart_data" and isinstance(function_response, dict) and "error" not in function_response:
+                        chart_data = function_response
+                        logger.info(f"=== CHART DATA CAPTURED ===")
+                        logger.info(f"Chart data type: {chart_data.get('data_type', 'unknown')}")
+                        logger.info(f"Chart title: {chart_data.get('title', 'unknown')}")
+                        logger.info(f"Chart data points: {len(chart_data.get('data_points', []))}")
+                        logger.info(f"Chart total value: {chart_data.get('total_value', 'unknown')}")
+                        logger.info(f"Chart unit: {chart_data.get('unit', 'unknown')}")
+                    elif function_name == "generate_chart_data":
+                        logger.warning(f"Chart data generation failed or returned error: {function_response}")
+                    
+                    # Track DynamoDB queries
+                    if function_name in ["get_user_information", "get_system_information", "get_inverter_information", "get_user_incidents"]:
+                        dynamodb_queries.append({
+                            "function": function_name,
+                            "query_type": function_args.get("data_type", "unknown"),
+                            "user_id": function_args.get("user_id"),
+                            "system_id": function_args.get("system_id"),
+                            "success": "error" not in function_response
                         })
-                        
-                        # Save source documents for RAG queries
-                        if function_name == "search_vector_db" and isinstance(function_response, list):
-                            source_documents = function_response
-                        
-                        # Save chart data for visualization
-                        if function_name == "generate_chart_data" and isinstance(function_response, dict) and "error" not in function_response:
-                            chart_data = function_response
-                            logger.info(f"=== CHART DATA CAPTURED ===")
-                            logger.info(f"Chart data type: {chart_data.get('data_type', 'unknown')}")
-                            logger.info(f"Chart title: {chart_data.get('title', 'unknown')}")
-                            logger.info(f"Chart data points: {len(chart_data.get('data_points', []))}")
-                            logger.info(f"Chart total value: {chart_data.get('total_value', 'unknown')}")
-                            logger.info(f"Chart unit: {chart_data.get('unit', 'unknown')}")
-                        elif function_name == "generate_chart_data":
-                            logger.warning(f"Chart data generation failed or returned error: {function_response}")
-                
-                # Add the function responses to the messages
-                if tool_responses:
-                    messages.extend(tool_responses)
-                
-                # Call the model again with the function responses
-                second_response = openai_client.chat.completions.create(
-                    model="gpt-4.1-mini",
-                    messages=messages,
-                    temperature=0.0,
-                )
-                
-                # Get the final response
-                final_response = second_response.choices[0].message.content
+            
+            # Add the function responses to the messages
+            if tool_responses:
+                messages.extend(tool_responses)
+            
+            # Call the model again with the function responses
+            second_response = openai_client.chat.completions.create(
+                model="gpt-4.1-mini",
+                messages=messages,
+                temperature=0.0,
+            )
+            
+            # Get the final response
+            final_response = second_response.choices[0].message.content
             else:
                 print("TOOL SELECTION: Model did not select any tool — simulating search_vector_db")
 
@@ -1734,7 +2100,8 @@ class SolarAssistantRAG:
             return {
                 "response": final_response,
                 "source_documents": source_documents,
-                "chart_data": chart_data
+                "chart_data": chart_data,
+                "dynamodb_queries": dynamodb_queries
             }
             
         except Exception as e:
@@ -1742,7 +2109,8 @@ class SolarAssistantRAG:
             return {
                 "response": f"I encountered an error while processing your request: {str(e)}",
                 "source_documents": [],
-                "chart_data": None
+                "chart_data": None,
+                "dynamodb_queries": []
             }
 
 # Global RAG instance
@@ -1800,6 +2168,49 @@ def get_chatbot_response(message: str, user_id: Optional[str] = None, system_id:
     except Exception as e:
         print(f"Error in chatbot response: {e}")
         return {"response": f"I encountered an error while processing your request: {str(e)}", "source_documents": []}
+def log_conversation_to_db(user_id: str, user_message: str, bot_response: str, system_id: str = None, chart_data: dict = None, dynamodb_queries: list = None):
+    """Log chatbot conversation to DynamoDB"""
+    if not table:
+        logger.error("Cannot log conversation - database not available")
+        return
+    
+    try:
+        timestamp = datetime.now().isoformat()
+        conversation_id = str(uuid.uuid4())
+        
+        # Create conversation log item
+        log_item = {
+            'PK': f'CHAT#{user_id}',
+            'SK': f'CONVERSATION#{timestamp}',
+            'user_message': user_message,
+            'bot_response': bot_response,
+            'system_id': system_id,
+            'timestamp': timestamp,
+            'conversation_id': conversation_id,
+            'has_chart': chart_data is not None,
+            'has_dynamodb_queries': dynamodb_queries is not None and len(dynamodb_queries) > 0
+        }
+        
+        # Add chart data if present
+        if chart_data:
+            log_item['chart_data'] = {
+                'data_type': chart_data.get('data_type', ''),
+                'time_period': chart_data.get('time_period', ''),
+                'total_value': Decimal(str(chart_data.get('total_value', 0))),  # Convert to Decimal
+                'unit': chart_data.get('unit', ''),
+                'data_points_count': len(chart_data.get('data_points', []))
+            }
+        
+        # Add DynamoDB query logging if present
+        if dynamodb_queries:
+            log_item['dynamodb_queries'] = dynamodb_queries
+        
+        # Store in DynamoDB
+        table.put_item(Item=log_item)
+        logger.info(f"Logged conversation for user {user_id} with ID {conversation_id}")
+        
+    except Exception as e:
+        logger.error(f"Failed to log conversation for user {user_id}: {str(e)}")
 
 #---------------------------------------
 # API Endpoints
@@ -1809,7 +2220,7 @@ def get_chatbot_response(message: str, user_id: Optional[str] = None, system_id:
 async def root():
     return {"message": "Welcome to the Solar O&M Chatbot API"}
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/api/chat", response_model=ChatResponse)
 async def chat(chat_message: ChatMessage):
     try:
         """
@@ -1851,7 +2262,8 @@ async def chat(chat_message: ChatMessage):
             user_message=chat_message.message,
             bot_response=result["response"],
             system_id=system_id,
-            chart_data=result.get("chart_data")
+            chart_data=result.get("chart_data"),
+            dynamodb_queries=result.get("dynamodb_queries", [])
         )
         
         # Process source documents if present
@@ -1882,541 +2294,6 @@ async def health_check():
         "rag_available": rag_available
     }
 
-#---------------------------------------
-# DynamoDB Helper Functions
-#---------------------------------------
 
-
-def register_device_in_db(device_data: DeviceRegistration) -> DeviceResponse:
-    """Register a device for push notifications in DynamoDB"""
-    if not table:
-        return DeviceResponse(success=False, message="Database not available")
-    print('INSIDE REGISTER DEVICE IN DB', device_data)
-    try:
-        # Create device record in the exact format requested
-        device_item = {
-            'PK': f'User#{device_data.user_id}',
-            'SK': f'Device#{device_data.device_id}',
-            'pushToken': device_data.expo_push_token,
-            'platform': device_data.platform,
-            'createdAt': datetime.utcnow().isoformat() + 'Z'
-        }
-        
-        # Upsert device (allow updates)
-        table.put_item(Item=device_item)
-        
-        return DeviceResponse(
-            success=True,
-            message=f"Device {device_data.device_id} registered successfully",
-            device_id=device_data.device_id
-        )
-        
-    except Exception as e:
-        return DeviceResponse(
-            success=False,
-            message=f"Error registering device: {str(e)}"
-        )
-
-def delete_device_from_db(user_id: str, device_id: str) -> DeviceResponse:
-    """Delete a device registration from DynamoDB"""
-    if not table:
-        return DeviceResponse(success=False, message="Database not available")
-    
-    try:
-        # Delete device record using exact PK/SK format
-        table.delete_item(
-            Key={
-                'PK': f'User#{user_id}',
-                'SK': f'Device#{device_id}'
-            }
-        )
-        
-        return DeviceResponse(
-            success=True,
-            message=f"Device {device_id} deleted successfully",
-            device_id=device_id
-        )
-        
-    except Exception as e:
-        return DeviceResponse(
-            success=False,
-            message=f"Error deleting device: {str(e)}"
-        )
-
-
-def get_user_systems(user_id: str) -> List[str]:
-    """Get list of system IDs accessible to a user"""
-    if not table:
-        return []
-    
-    try:
-        # First, get the user profile to check their role
-        profile_response = table.get_item(
-            Key={
-                'PK': f'User#{user_id}',
-                'SK': 'PROFILE'
-            }
-        )
-        
-        # Check if user profile exists and extract role
-        user_role = "user"  # default role
-        if 'Item' in profile_response:
-            user_role = profile_response['Item'].get('role', 'user')
-        
-        # If user is admin, return all systems
-        if user_role == "admin":
-            print(f"User {user_id} is admin, fetching all systems")
-            # Query for all system profiles (PK begins with "System#" and SK = "PROFILE")
-            response = table.scan(
-                FilterExpression=boto3.dynamodb.conditions.Attr('PK').begins_with('System#') & 
-                               boto3.dynamodb.conditions.Attr('SK').eq('PROFILE')
-            )
-            
-            # Extract systemId from each system profile
-            system_ids = []
-            for item in response.get('Items', []):
-                # Extract system ID from PK (remove "System#" prefix)
-                system_id = item['PK'].replace('System#', '')
-                system_ids.append(system_id)
-            
-            print(f"Admin user {user_id} has access to {len(system_ids)} systems")
-            return system_ids
-        
-        else:
-            # Regular user - use existing logic
-            print(f"User {user_id} is regular user, fetching linked systems")
-            response = table.query(
-                KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
-                ExpressionAttributeValues={
-                    ':pk': f'User#{user_id}',
-                    ':sk': 'System#'
-                }
-            )
-            
-            system_ids = [item['systemId'] for item in response.get('Items', [])]
-            print(f"Regular user {user_id} has access to {len(system_ids)} systems")
-            return system_ids
-        
-    except Exception as e:
-        print(f"Error getting user systems: {str(e)}")
-        return []
-
-def get_user_profile(user_id: str) -> Dict[str, Any]:
-    """Get user profile data from DynamoDB"""
-    if not table:
-        return {"error": "Database not available"}
-    
-    try:
-        response = table.get_item(
-            Key={
-                'PK': f'User#{user_id}',
-                'SK': 'PROFILE'
-            }
-        )
-        
-        if 'Item' in response:
-            item = response['Item']
-            return {
-                'email': item.get('email', ''),
-                'name': item.get('name', ''),
-                'username': item.get('username', ''),
-                'role': item.get('role', 'user'),
-                'createdAt': item.get('createdAt', ''),
-                'lastLogin': item.get('lastLogin', '')
-            }
-        else:
-            return {"error": "User profile not found"}
-            
-    except Exception as e:
-        return {"error": f"Error getting user profile: {str(e)}"}
-
-def log_conversation_to_db(user_id: str, user_message: str, bot_response: str, system_id: str = None, chart_data: dict = None):
-    """Log chatbot conversation to DynamoDB"""
-    if not table:
-        logger.error("Cannot log conversation - database not available")
-        return
-    
-    try:
-        timestamp = datetime.now().isoformat()
-        conversation_id = str(uuid.uuid4())
-        
-        # Create conversation log item
-        log_item = {
-            'PK': f'CHAT#{user_id}',
-            'SK': f'CONVERSATION#{timestamp}',
-            'user_message': user_message,
-            'bot_response': bot_response,
-            'system_id': system_id,
-            'timestamp': timestamp,
-            'conversation_id': conversation_id,
-            'has_chart': chart_data is not None
-        }
-        
-        # Add chart data if present
-        if chart_data:
-            log_item['chart_data'] = {
-                'data_type': chart_data.get('data_type', ''),
-                'time_period': chart_data.get('time_period', ''),
-                'total_value': Decimal(str(chart_data.get('total_value', 0))),  # Convert to Decimal
-                'unit': chart_data.get('unit', ''),
-                'data_points_count': len(chart_data.get('data_points', []))
-            }
-        
-        # Store in DynamoDB
-        table.put_item(Item=log_item)
-        logger.info(f"Logged conversation for user {user_id} with ID {conversation_id}")
-        
-    except Exception as e:
-        logger.error(f"Failed to log conversation for user {user_id}: {str(e)}")
-
-# CONSOLIDATED DATA FUNCTIONS
-
-def get_consolidated_period_data(system_id: str, period_type: str, period_key: str = None) -> Dict[str, Any]:
-    """
-    Get consolidated period data (weekly, monthly, yearly) for a specific system
-    """
-    if not table:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
-    try:
-        if period_key is None:
-            # Get the most recent entry for this period type
-            response = table.query(
-                IndexName='SystemDateIndex',
-                KeyConditionExpression=boto3.dynamodb.conditions.Key('PK').eq(f'System#{system_id}') & 
-                                     boto3.dynamodb.conditions.Key('SK').begins_with(f'DATA#{period_type.upper()}#'),
-                ScanIndexForward=False,  # Get most recent first
-                Limit=1
-            )
-        else:
-            # Get specific period
-            sk_value = f'DATA#{period_type.upper()}#{period_key}'
-            response = table.get_item(
-                Key={
-                    'PK': f'System#{system_id}',
-                    'SK': sk_value
-                }
-            )
-            
-            if 'Item' in response:
-                response = {'Items': [response['Item']]}
-            else:
-                response = {'Items': []}
-        
-        if not response['Items']:
-            return {"error": f"No {period_type} data found for system {system_id}"}
-        
-        item = response['Items'][0]
-        
-        # Convert Decimal types to float for JSON serialization
-        def convert_decimals(obj):
-            if isinstance(obj, dict):
-                return {k: convert_decimals(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [convert_decimals(v) for v in obj]
-            elif isinstance(obj, Decimal):
-                return float(obj)
-            return obj
-        
-        result = convert_decimals(item)
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error getting consolidated {period_type} data: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get {period_type} data")
-
-
-# CONSOLIDATED API ENDPOINTS
-@app.get("/api/systems/{system_id}/consolidated-daily")
-async def get_system_consolidated_daily_data(
-    system_id: str,
-    date: str = None
-):
-    """
-    API endpoint to get consolidated daily data (energy, power, CO2, earnings) from DynamoDB
-    """
-    logger.info(f"=== API ENDPOINT: /api/systems/{system_id}/consolidated-daily ===")
-    logger.info(f"Parameters - system_id: {system_id}, date: {date}")
-    
-    try:
-        if not date:
-            date = datetime.utcnow().strftime("%Y-%m-%d")
-            logger.info(f"No date provided, using current date: {date}")
-            
-        data = get_consolidated_period_data(system_id, "DAILY", date)
-        logger.info(f"API endpoint result: {data}")
-        
-        if "error" in data:
-            logger.error(f"Raising HTTPException 500: {data['error']}")
-            raise HTTPException(status_code=500, detail=data["error"])
-        return data
-    except HTTPException as he:
-        logger.error(f"HTTPException raised: {he.status_code} - {he.detail}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected exception in API endpoint: {str(e)}")
-        import traceback
-        logger.error(f"Endpoint traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/systems/{system_id}/consolidated-weekly")
-async def get_system_consolidated_weekly_data(
-    system_id: str,
-    week_start: str = None
-):
-    """
-    API endpoint to get consolidated weekly data (energy, CO2, earnings) from DynamoDB
-    """
-    logger.info(f"=== API ENDPOINT: /api/systems/{system_id}/consolidated-weekly ===")
-    logger.info(f"Parameters - system_id: {system_id}, week_start: {week_start}")
-    
-    try:
-        data = get_consolidated_period_data(system_id, "WEEKLY", week_start)
-        logger.info(f"API endpoint result: {data}")
-        
-        if "error" in data:
-            logger.error(f"Raising HTTPException 500: {data['error']}")
-            raise HTTPException(status_code=500, detail=data["error"])
-        return data
-    except HTTPException as he:
-        logger.error(f"HTTPException raised: {he.status_code} - {he.detail}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected exception in API endpoint: {str(e)}")
-        import traceback
-        logger.error(f"Endpoint traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/systems/{system_id}/consolidated-monthly")
-async def get_system_consolidated_monthly_data(
-    system_id: str,
-    month: str = None
-):
-    """
-    API endpoint to get consolidated monthly data (energy, CO2, earnings) from DynamoDB
-    """
-    try:
-        data = get_consolidated_period_data(system_id, "MONTHLY", month)
-        if "error" in data:
-            raise HTTPException(status_code=500, detail=data["error"])
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/systems/{system_id}/consolidated-yearly")
-async def get_system_consolidated_yearly_data(
-    system_id: str,
-    year: str = None
-):
-    """
-    API endpoint to get consolidated yearly data (energy, CO2, earnings) from DynamoDB
-    """
-    try:
-        data = get_consolidated_period_data(system_id, "YEARLY", year)
-        if "error" in data:
-            raise HTTPException(status_code=500, detail=data["error"])
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/systems/{system_id}/profile")
-async def get_system_profile_data(system_id: str):
-    """
-    API endpoint to get system profile data from DynamoDB
-    """
-    logger.info(f"=== API ENDPOINT: /api/systems/{system_id}/profile ===")
-    logger.info(f"Parameters - system_id: {system_id}")
-    
-    if not table:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
-    try:
-        # Query DynamoDB for system profile
-        response = table.get_item(
-            Key={
-                'PK': f'System#{system_id}',
-                'SK': 'PROFILE'
-            }
-        )
-        
-        if 'Item' not in response:
-            logger.warning(f"No profile found for system {system_id}")
-            raise HTTPException(status_code=404, detail=f"System profile not found for {system_id}")
-        
-        item = response['Item']
-        
-        # Convert Decimal types to float for JSON serialization
-        def convert_decimals(obj):
-            if isinstance(obj, dict):
-                return {k: convert_decimals(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [convert_decimals(v) for v in obj]
-            elif isinstance(obj, Decimal):
-                return float(obj)
-            return obj
-        
-        profile_data = convert_decimals(item)
-        logger.info(f"Successfully retrieved profile for system {system_id}")
-        
-        return profile_data
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting system profile for {system_id}: {str(e)}")
-        import traceback
-        logger.error(f"Profile endpoint traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/systems/{system_id}/status")
-async def get_system_status(system_id: str):
-    """
-    API endpoint to get system status from DynamoDB
-    """
-    logger.info(f"=== API ENDPOINT: /api/systems/{system_id}/status ===")
-    logger.info(f"Parameters - system_id: {system_id}")
-    
-    if not table:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
-    try:
-        # Query DynamoDB for system status
-        response = table.get_item(
-            Key={
-                'PK': f'System#{system_id}',
-                'SK': 'STATUS'
-            }
-        )
-        
-        if 'Item' not in response:
-            logger.warning(f"No status found for system {system_id}")
-            # Return default status if no record found
-            return {
-                "status": "offline",
-                "message": "No status data available"
-            }
-        
-        item = response['Item']
-        
-        # Convert Decimal types to appropriate types for JSON serialization
-        def convert_decimals(obj):
-            if isinstance(obj, dict):
-                return {k: convert_decimals(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [convert_decimals(v) for v in obj]
-            elif isinstance(obj, Decimal):
-                return float(obj)
-            return obj
-        
-        status_data = convert_decimals(item)
-        logger.info(f"Successfully retrieved status for system {system_id}: {status_data.get('status', 'unknown')}")
-        
-        return status_data
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting system status for {system_id}: {str(e)}")
-        import traceback
-        logger.error(f"Status endpoint traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-#---------------------------------------
-# API Routes
-#---------------------------------------
-
-
-
-@app.get("/api/user/{user_id}/profile")
-async def get_user_profile_endpoint(user_id: str):
-    """
-    Get user profile data from DynamoDB
-    """
-    logger.info(f"GET /api/user/{user_id}/profile")
-    
-    try:
-        profile_data = get_user_profile(user_id)
-        logger.info(f"Profile data result: {profile_data}")
-        
-        if "error" in profile_data:
-            raise HTTPException(status_code=404, detail=profile_data["error"])
-        
-        return profile_data
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in get_user_profile_endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.get("/api/user/{user_id}/systems")
-async def get_user_systems_endpoint(user_id: str):
-    """
-    Get user's accessible systems from DynamoDB
-    """
-    logger.info(f"GET /api/user/{user_id}/systems")
-    
-    try:
-        systems_data = get_user_systems(user_id)
-        logger.info(f"Systems data result: Found {len(systems_data)} systems")
-        
-        return systems_data
-        
-    except Exception as e:
-        logger.error(f"Error in get_user_systems_endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.post("/api/device/register", response_model=DeviceResponse)
-async def register_device_endpoint(device_data: DeviceRegistration):
-    """
-    Register a device for push notifications in DynamoDB
-    """
-    logger.info(f"POST /api/device/register - User: {device_data.user_id}, Device: {device_data.device_id}")
-    
-    try:
-        result = register_device_in_db(device_data)
-        logger.info(f"Device registration result: {result.message}")
-        
-        if not result.success:
-            raise HTTPException(status_code=400, detail=result.message)
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in register_device_endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.delete("/api/device/{user_id}/{device_id}", response_model=DeviceResponse)
-async def delete_device_endpoint(user_id: str, device_id: str):
-    """
-    Delete a device registration when user logs out
-    """
-    logger.info(f"DELETE /api/device/{user_id}/{device_id}")
-    
-    try:
-        result = delete_device_from_db(user_id, device_id)
-        logger.info(f"Device deletion result: {result.message}")
-        
-        if not result.success:
-            raise HTTPException(status_code=400, detail=result.message)
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in delete_device_endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-# Create a handler for AWS Lambda
-handler = Mangum(app)
-
-# Keep the local development server
-if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+# AWS Lambda handler
+handler = Mangum(app) 

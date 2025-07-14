@@ -1,26 +1,29 @@
 """
-Solar System Technician Notification Handler
+Solar System Technician Notification Handler - EventBridge Scheduler Version
 
-This script handles incoming SNS messages for solar system status changes
-and sends email notifications to technicians when systems go offline or have errors.
+This script handles EventBridge scheduler triggers for incident-based technician notifications.
+It processes incidents that have been pending for 1 hour and sends email notifications to technicians.
 
 Key Features:
-- Processes SNS messages for status changes (only offline/red statuses)
-- Looks up users with access to each system
-- Fetches technician email from user profiles
-- Sends formatted email notifications via AWS SES
-- Includes Google Forms link for technician response
+- Triggered by EventBridge scheduler (1 hour after incident creation)
+- Receives incident_id and user_id from EventBridge payload
+- Fetches incident record from DynamoDB
+- Checks incident status (pending/dismissed)
+- Sends email to technician if still pending
+- Marks incident as processed and deletes schedule
+- Skips notification if incident was dismissed
 
 Usage:
-- As AWS Lambda: deploy and configure with SNS trigger.
-- Requires AWS SES permissions for sending emails.
+- As AWS Lambda: deploy and configure with EventBridge scheduler trigger
+- Requires AWS SES permissions for sending emails
+- Requires EventBridge scheduler permissions for cleanup
 """
 
 import json
 import logging
 import os
 import boto3
-from typing import List, Dict, Any, Set
+from typing import Dict, Any, Optional
 from datetime import datetime
 from boto3.dynamodb.conditions import Key
 
@@ -29,7 +32,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger('notify_technician')
+logger = logging.getLogger('notify_technician_scheduled')
 
 # AWS Configuration
 AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
@@ -38,36 +41,51 @@ AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
 dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 table = dynamodb.Table(os.environ.get('DYNAMODB_TABLE_NAME', 'Moose-DDB'))
 ses_client = boto3.client('ses', region_name=AWS_REGION)
+scheduler = boto3.client('scheduler', region_name=AWS_REGION)
 
-def get_users_with_system_access(system_id: str) -> List[str]:
-    """Get all users who have access to the specified system - EXACT COPY from notify.py"""
+def get_incident_record(incident_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch incident record from DynamoDB"""
     try:
-        # Always include admin user ID (hardcoded)
-        ADMIN_USER_ID = "04484418-1051-70ea-d0d3-afb45eadb6e7"
-        user_ids = [ADMIN_USER_ID]
-        
-        response = table.query(
-            IndexName='user-system-index',  # <- your actual GSI name
-            KeyConditionExpression=Key('GSI1PK').eq(f'System#{system_id}') & Key('GSI1SK').begins_with('User#'),
+        response = table.get_item(
+            Key={
+                'PK': f'Incident#{incident_id}',
+                'SK': f'User#{user_id}'
+            }
         )
-        logger.info(f"Query response: {response}")
         
-        for item in response.get('Items', []):
-            user_id = item.get('userId')
-            # Avoid duplicates in case admin is already in the system access list
-            if user_id not in user_ids:
-                user_ids.append(user_id)
-        
-        logger.info(f"Found {len(user_ids)} users with access to system {system_id} (including admin)")
-        return user_ids
-        
+        if 'Item' in response:
+            logger.info(f"Found incident record for incident {incident_id}, user {user_id}")
+            return response['Item']
+        else:
+            logger.warning(f"No incident record found for incident {incident_id}, user {user_id}")
+            return None
+            
     except Exception as e:
-        logger.error(f"Error getting users for system {system_id}: {str(e)}")
-        # Even if there's an error, always return admin user ID
-        return ["04484418-1051-70ea-d0d3-afb45eadb6e7"]
+        logger.error(f"Error fetching incident record {incident_id}: {str(e)}")
+        return None
+
+def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
+    """Get user profile from DynamoDB"""
+    try:
+        response = table.get_item(
+            Key={
+                'PK': f'User#{user_id}',
+                'SK': 'PROFILE'
+            }
+        )
+        
+        if 'Item' in response:
+            return response['Item']
+        else:
+            logger.warning(f"No profile found for user {user_id}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error getting user profile for {user_id}: {str(e)}")
+        return None
 
 def get_system_name(system_id: str) -> str:
-    """Get system name from DynamoDB - EXACT COPY from notify.py"""
+    """Get system name from DynamoDB"""
     try:
         response = table.get_item(
             Key={
@@ -85,118 +103,111 @@ def get_system_name(system_id: str) -> str:
         logger.error(f"Error getting system name for {system_id}: {str(e)}")
         return f'System {system_id[:8]}'
 
-def get_device_name(device_id: str, pv_system_id: str) -> str:
-    """Get device name from DynamoDB - EXACT COPY from notify.py"""
+def get_device_name(device_id: str) -> str:
+    """Get device display name"""
+    try:
+        return f"Inverter {device_id[:8]}"
+    except Exception as e:
+        logger.error(f"Error formatting device name for {device_id}: {str(e)}")
+        return f"Inverter {device_id[:8] if device_id else 'Unknown'}"
+
+def get_current_device_status(device_id: str) -> Optional[Dict[str, Any]]:
+    """Get current device status from DynamoDB"""
     try:
         response = table.get_item(
             Key={
-                'PK': f'Inverter<{device_id}>',
+                'PK': f'Inverter#{device_id}',
                 'SK': 'STATUS'
             }
         )
         
         if 'Item' in response:
-            # Could potentially have device name in the future
-            return f"Inverter {device_id[:8]}"
+            logger.info(f"Found current status for device {device_id}: {response['Item'].get('status', 'unknown')}")
+            return response['Item']
         else:
-            return f"Inverter {device_id[:8]}"
+            logger.warning(f"No current status found for device {device_id}")
+            return None
             
     except Exception as e:
-        logger.error(f"Error getting device name for {device_id}: {str(e)}")
-        return f"Inverter {device_id[:8]}"
+        logger.error(f"Error getting current device status for {device_id}: {str(e)}")
+        return None
 
-def get_technician_emails(user_ids: List[str]) -> Set[str]:
-    """Get technician emails from user profiles"""
-    technician_emails = set()
-    
-    for user_id in user_ids:
-        try:
-            response = table.get_item(
-                Key={
-                    'PK': f'User#{user_id}',
-                    'SK': 'PROFILE'
-                }
-            )
-            
-            if 'Item' in response:
-                technician_email = response['Item'].get('technician_email')
-                if technician_email and technician_email.strip():
-                    technician_emails.add(technician_email.strip())
-                    logger.info(f"Found technician email for user {user_id}: {technician_email}")
-                else:
-                    logger.warning(f"No technician_email found for user {user_id}")
-            else:
-                logger.warning(f"No profile found for user {user_id}")
-                
-        except Exception as e:
-            logger.error(f"Error getting technician email for user {user_id}: {str(e)}")
-    
-    logger.info(f"Collected {len(technician_emails)} unique technician emails")
-    return technician_emails
+def mark_incident_as_dismissed(incident_id: str, user_id: str, reason: str = "status reverted") -> bool:
+    """Mark incident as dismissed in DynamoDB"""
+    try:
+        table.update_item(
+            Key={
+                'PK': f'Incident#{incident_id}',
+                'SK': f'User#{user_id}'
+            },
+            UpdateExpression='SET #status = :status, processedAt = :processed_at, dismissedReason = :reason',
+            ExpressionAttributeNames={
+                '#status': 'status'
+            },
+            ExpressionAttributeValues={
+                ':status': 'dismissed',
+                ':processed_at': int(datetime.now().timestamp()),
+                ':reason': reason
+            }
+        )
+        
+        logger.info(f"✅ Marked incident {incident_id} as dismissed with reason: {reason}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to mark incident {incident_id} as dismissed: {str(e)}")
+        return False
 
-def format_email_content(display_name: str, new_status: str, previous_status: str, power: float, system_id: str, is_device: bool = False) -> Dict[str, str]:
+def format_technician_email(incident: Dict[str, Any], system_name: str, device_name: str) -> Dict[str, str]:
     """Format email subject and body for technician notification"""
     
-    status_emojis = {
-        'red': '🔴',
-        'offline': '🔌'
-    }
-    
-    status_names = {
-        'red': 'Error',
-        'offline': 'Offline'
-    }
-    
-    emoji = status_emojis.get(new_status, '⚠️')
-    status_name = status_names.get(new_status, new_status.title())
-    device_type = "Inverter" if is_device else "System"
+    # Extract incident details
+    system_id = incident.get('systemId', 'Unknown')
+    device_id = incident.get('deviceId', 'Unknown')
+    user_id = incident.get('userId', 'Unknown')
+    # Convert Decimal to float for datetime.fromtimestamp()
+    expires_at = float(incident.get('expiresAt', 0))
+    created_time = datetime.fromtimestamp(expires_at - 3600)  # 1 hour before expiry
     
     # Email subject
-    subject = f"URGENT: {device_type} {status_name} - {display_name}"
+    subject = f"URGENT: Solar System Alert - {device_name} ({system_name})"
     
-    # Email body with formatted message and Google Forms link
+    # Email body
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+    incident_time = created_time.strftime("%Y-%m-%d %H:%M:%S UTC")
     
-    if new_status == 'red':
-        issue_description = f"{device_type} has errors and requires immediate attention."
-        priority = "HIGH"
-    elif new_status == 'offline':
-        issue_description = f"{device_type} is offline and not responding."
-        priority = "CRITICAL"
-    else:
-        issue_description = f"Status changed from {previous_status} to {new_status}."
-        priority = "MEDIUM"
-    
-    # Google Forms placeholder link
-    google_forms_link = "https://forms.google.com/placeholder-technician-response"
+    # Google Forms link
+    google_forms_link = f"https://docs.google.com/forms/d/e/1FAIpQLSd3Zz3kKNNogw377llp6pNm_yvcqVXi465U2dRClEdYFAzonw/viewform?usp=pp_url&entry.209729194={user_id}"
     
     body = f"""
 SOLAR SYSTEM ALERT - TECHNICIAN NOTIFICATION
+INCIDENT ESCALATION (1 HOUR PENDING)
 
 System Information:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• {device_type}: {display_name}
+• Device: {device_name}
+• System: {system_name}
 • System ID: {system_id}
-• Status: {status_name} {emoji}
-• Previous Status: {previous_status.title()}
-• Current Power: {power:,.0f}W
-• Priority: {priority}
-• Timestamp: {timestamp}
+• Device ID: {device_id}
+• Incident Created: {incident_time}
+• Escalated At: {timestamp}
+• Priority: HIGH - REQUIRES ATTENTION
 
 Issue Description:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{issue_description}
+Device status change detected and has been pending for 1 hour without user response.
+This incident requires immediate technician attention.
 
 Action Required:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Please investigate this issue and take appropriate action. 
+Please investigate this device/system issue and take appropriate action.
 
 RESPOND TO THIS ALERT:
 Click here to log your response: {google_forms_link}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-This is an automated notification from the Solar Monitoring System.
-Location: Lac des Mille Lacs First Nation (LDMLFN)
+This is an automated escalation from Moose.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
     
@@ -205,180 +216,234 @@ Location: Lac des Mille Lacs First Nation (LDMLFN)
         'body': body
     }
 
-def send_technician_emails(emails: Set[str], subject: str, body: str) -> bool:
-    """Send email notifications to technicians via AWS SES"""
-    if not emails:
-        logger.warning("No technician emails to send notifications to.")
-        return True
-    
-    success_count = 0
-    error_count = 0
-    
-    # Send individual emails to each technician
-    for email in emails:
-        try:
-            response = ses_client.send_email(
-                Source=os.environ.get('SES_FROM_EMAIL', 'noreply@jazzsolar.com'),
-                Destination={
-                    'ToAddresses': [email]
+def send_technician_email(email: str, subject: str, body: str) -> bool:
+    """Send email notification to technician via AWS SES"""
+    try:
+        response = ses_client.send_email(
+            Source=os.environ.get('SES_FROM_EMAIL', 'sabari@jazzsolar.com'),
+            Destination={
+                'ToAddresses': [email]
+            },
+            Message={
+                'Subject': {
+                    'Data': subject,
+                    'Charset': 'UTF-8'
                 },
-                Message={
-                    'Subject': {
-                        'Data': subject,
+                'Body': {
+                    'Text': {
+                        'Data': body,
                         'Charset': 'UTF-8'
-                    },
-                    'Body': {
-                        'Text': {
-                            'Data': body,
-                            'Charset': 'UTF-8'
-                        }
                     }
                 }
-            )
-            
-            logger.info(f"✅ Email sent successfully to {email}. SES MessageId: {response['MessageId']}")
-            success_count += 1
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to send email to {email}: {str(e)}")
-            error_count += 1
-    
-    logger.info(f"Email sending complete. Success: {success_count}, Errors: {error_count}")
-    return error_count == 0
-
-def should_notify_technician(new_status: str, previous_status: str) -> bool:
-    """Check if technician should be notified based on status change"""
-    # Only notify for changes TO offline or red status
-    # Don't care if something switches back to green
-    if new_status in ['offline', 'red']:
-        logger.info(f"Status changed to {new_status} - technician notification required")
+            }
+        )
+        
+        logger.info(f"✅ Email sent successfully to {email}. SES MessageId: {response['MessageId']}")
         return True
-    
-    logger.info(f"Status changed to {new_status} - no technician notification needed")
-    return False
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to send email to {email}: {str(e)}")
+        return False
 
-def process_technician_notification(sns_message: Dict[str, Any]) -> Dict[str, int]:
-    """Process a status change notification for technician alerts"""
-    stats = {
-        'users_found': 0,
-        'technician_emails_found': 0,
-        'emails_sent': 0,
-        'errors': 0
+def mark_incident_as_processed(incident_id: str, user_id: str) -> bool:
+    """Mark incident as processed in DynamoDB"""
+    try:
+        table.update_item(
+            Key={
+                'PK': f'Incident#{incident_id}',
+                'SK': f'User#{user_id}'
+            },
+            UpdateExpression='SET #status = :status, processedAt = :processed_at',
+            ExpressionAttributeNames={
+                '#status': 'status'
+            },
+            ExpressionAttributeValues={
+                ':status': 'processed',
+                ':processed_at': int(datetime.now().timestamp())
+            }
+        )
+        
+        logger.info(f"✅ Marked incident {incident_id} as processed")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to mark incident {incident_id} as processed: {str(e)}")
+        return False
+
+def cleanup_schedule(incident_id: str, user_id: str) -> bool:
+    """Delete the EventBridge schedule after processing"""
+    schedule_name = f"incident-{incident_id[:8]}-user-{user_id[:8]}"
+    
+    try:
+        scheduler.delete_schedule(Name=schedule_name)
+        logger.info(f"✅ Deleted EventBridge schedule {schedule_name}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to delete EventBridge schedule {schedule_name}: {str(e)}")
+        return False
+
+def process_incident_notification(incident_id: str, user_id: str) -> Dict[str, Any]:
+    """Process a scheduled incident notification"""
+    result = {
+        'incident_id': incident_id,
+        'user_id': user_id,
+        'status': 'error',
+        'action_taken': 'none',
+        'email_sent': False,
+        'marked_processed': False,
+        'schedule_cleaned': False,
+        'message': '',
+        'new_status': 'unknown'
     }
     
     try:
-        # Extract message details
-        device_id = sns_message.get('deviceId')  # New device-level format
-        system_id = sns_message.get('pvSystemId')  # Always present
-        new_status = sns_message.get('newStatus')
-        previous_status = sns_message.get('previousStatus')
-        power = sns_message.get('power', 0)
+        # Step 1: Get incident record
+        incident = get_incident_record(incident_id, user_id)
+        if not incident:
+            result['message'] = 'Incident record not found - ignoring'
+            result['status'] = 'ignored'
+            result['schedule_cleaned'] = cleanup_schedule(incident_id, user_id)
+            return result
         
-        if not all([system_id, new_status, previous_status]):
-            logger.error("Missing required fields in SNS message")
-            stats['errors'] += 1
-            return stats
+        # Step 2: Check incident status
+        incident_status = incident.get('status', 'unknown')
+        logger.info(f"Incident {incident_id} status: {incident_status}")
+        result['new_status'] = incident.get('newStatus', 'unknown')
+        if incident_status == 'dismissed':
+            # User dismissed the incident - just mark as processed and cleanup
+            result['action_taken'] = 'dismissed_cleanup'
+            result['marked_processed'] = mark_incident_as_processed(incident_id, user_id)
+            result['schedule_cleaned'] = cleanup_schedule(incident_id, user_id)
+            result['message'] = 'Incident was dismissed - cleaned up without email'
+            result['status'] = 'success'
+            return result
         
-        # Check if we should notify technician
-        if not should_notify_technician(new_status, previous_status):
-            logger.info("No technician notification needed for this status change")
-            return stats
+        elif incident_status == 'pending':
+            # Step 3: Check current device status before proceeding
+            device_id = incident.get('deviceId', 'Unknown')
+            current_device_status = get_current_device_status(device_id)
+            
+            if not current_device_status:
+                # Can't get current status - proceed with notification as precaution
+                logger.warning(f"Could not get current status for device {device_id} - proceeding with notification")
+                result['action_taken'] = 'email_sent_no_status_check'
+            else:
+                # Compare current status with what would trigger incident (red/error status)
+                current_status = current_device_status.get('status', 'unknown')
+                current_reason = current_device_status.get('reason', '')
+                
+                logger.info(f"Current device status: {current_status}, reason: {current_reason}")
+                
+                # If device is now green (recovered), dismiss the incident
+                if current_status == 'green':
+                    logger.info(f"Device {device_id} has recovered (status: green) - dismissing incident")
+                    result['action_taken'] = 'dismissed_status_reverted'
+                    result['marked_processed'] = mark_incident_as_dismissed(incident_id, user_id, "Incident was dismissed - status reverted")
+                    result['schedule_cleaned'] = cleanup_schedule(incident_id, user_id)
+                    result['message'] = 'Incident was dismissed - status reverted'
+                    result['status'] = 'success'
+                    return result
+                
+                # If device is still in error state (red or other non-green), proceed with notification
+                logger.info(f"Device {device_id} still in error state ({current_status}) - proceeding with technician notification")
+                result['action_taken'] = 'email_sent_status_confirmed'
+            
+            # Step 4: Get user profile for technician email
+            user_profile = get_user_profile(user_id)
+            if not user_profile:
+                result['message'] = 'User profile not found - ignoring'
+                result['status'] = 'ignored'
+                result['schedule_cleaned'] = cleanup_schedule(incident_id, user_id)
+                return result
+            
+            technician_email = user_profile.get('technician_email')
+            if not technician_email or not technician_email.strip():
+                result['message'] = 'No technician email found - ignoring'
+                result['status'] = 'ignored'
+                result['marked_processed'] = mark_incident_as_processed(incident_id, user_id)
+                result['schedule_cleaned'] = cleanup_schedule(incident_id, user_id)
+                return result
+            
+            # Step 5: Get system and device names
+            system_id = incident.get('systemId', 'Unknown')
+            system_name = get_system_name(system_id)
+            device_name = get_device_name(device_id)
+            
+            # Step 6: Format and send email
+            email_content = format_technician_email(incident, system_name, device_name)
+            result['email_sent'] = send_technician_email(
+                technician_email.strip(),
+                email_content['subject'],
+                email_content['body']
+            )
+            
+            # Step 7: Mark as processed and cleanup
+            result['marked_processed'] = mark_incident_as_processed(incident_id, user_id)
+            result['schedule_cleaned'] = cleanup_schedule(incident_id, user_id)
+            
+            if result['email_sent'] and result['marked_processed']:
+                result['status'] = 'success'
+                result['message'] = f'Email sent to {technician_email}'
+            else:
+                result['message'] = 'Partial failure in processing'
+            
+            return result
         
-        is_device_notification = device_id is not None
-        
-        if is_device_notification:
-            logger.info(f"Processing device-level technician notification for device {device_id} in system {system_id}: {previous_status} → {new_status}")
-            display_name = get_device_name(device_id, system_id)
         else:
-            logger.info(f"Processing system-level technician notification for system {system_id}: {previous_status} → {new_status}")
-            display_name = get_system_name(system_id)
-        
-        # Get users with access to this system (using exact logic from notify.py)
-        user_ids = get_users_with_system_access(system_id)
-        stats['users_found'] = len(user_ids)
-        
-        if not user_ids:
-            logger.warning(f"No users found with access to system {system_id}")
-            return stats
-        
-        # Get technician emails from user profiles
-        technician_emails = get_technician_emails(user_ids)
-        stats['technician_emails_found'] = len(technician_emails)
-        
-        if not technician_emails:
-            logger.warning(f"No technician emails found for system {system_id}")
-            return stats
-        
-        # Format email content
-        email_content = format_email_content(
-            display_name, new_status, previous_status, power, system_id, is_device_notification
-        )
-        
-        # Send emails to technicians
-        success = send_technician_emails(
-            emails=technician_emails,
-            subject=email_content['subject'],
-            body=email_content['body']
-        )
-        
-        if success:
-            stats['emails_sent'] = len(technician_emails)
-        else:
-            stats['errors'] += len(technician_emails)
-        
-        notification_type = "device" if is_device_notification else "system"
-        logger.info(f"✅ {notification_type.title()}-level technician notification processing complete for {system_id}. Sent emails to {stats['emails_sent']} technicians.")
-        return stats
-        
+            # Unknown status - mark as processed and cleanup
+            result['action_taken'] = 'unknown_status_cleanup'
+            result['marked_processed'] = mark_incident_as_processed(incident_id, user_id)
+            result['schedule_cleaned'] = cleanup_schedule(incident_id, user_id)
+            result['message'] = f'Unknown incident status: {incident_status}'
+            result['status'] = 'success'
+            return result
+            
     except Exception as e:
-        logger.error(f"❌ Error processing technician notification: {str(e)}")
-        stats['errors'] += 1
-        return stats
+        logger.error(f"❌ Error processing incident notification: {str(e)}")
+        result['message'] = f'Processing error: {str(e)}'
+        # Try to cleanup schedule even on error
+        result['schedule_cleaned'] = cleanup_schedule(incident_id, user_id)
+        return result
 
 def lambda_handler(event, context):
-    """AWS Lambda handler function triggered by SNS"""
+    """AWS Lambda handler function triggered by EventBridge Scheduler"""
     try:
-        logger.info("Technician notification handler started")
+        logger.info("Technician notification handler started (EventBridge Scheduler)")
+        logger.info(f"Received event: {json.dumps(event)}")
         
-        total_stats = {
-            'messages_processed': 0,
-            'users_found': 0,
-            'technician_emails_found': 0,
-            'emails_sent': 0,
-            'errors': 0
-        }
+        # Extract incident_id and user_id from EventBridge payload
+        incident_id = event.get('incident_id')
+        user_id = event.get('user_id')
         
-        # Process SNS records
-        for record in event.get('Records', []):
-            if record.get('EventSource') == 'aws:sns':
-                try:
-                    # Parse SNS message
-                    sns_message = json.loads(record['Sns']['Message'])
-                    
-                    # Process the technician notification
-                    stats = process_technician_notification(sns_message)
-                    
-                    # Aggregate stats
-                    total_stats['messages_processed'] += 1
-                    total_stats['users_found'] += stats['users_found']
-                    total_stats['technician_emails_found'] += stats['technician_emails_found']
-                    total_stats['emails_sent'] += stats['emails_sent']
-                    total_stats['errors'] += stats['errors']
-                    
-                except Exception as e:
-                    logger.error(f"Error processing SNS record: {str(e)}")
-                    total_stats['errors'] += 1
+        if not incident_id or not user_id:
+            logger.error("Missing incident_id or user_id in EventBridge payload")
+            return {
+                'statusCode': 400,
+                'body': json.dumps({
+                    'error': 'Missing required fields',
+                    'message': 'incident_id and user_id are required'
+                })
+            }
         
-        logger.info("=== TECHNICIAN NOTIFICATION PROCESSING COMPLETED ===")
-        logger.info(f"📨 Messages processed: {total_stats['messages_processed']}")
-        logger.info(f"👥 Users found: {total_stats['users_found']}")
-        logger.info(f"📧 Technician emails found: {total_stats['technician_emails_found']}")
-        logger.info(f"✉️ Emails sent: {total_stats['emails_sent']}")
-        logger.info(f"❌ Errors: {total_stats['errors']}")
+        logger.info(f"Processing incident {incident_id} for user {user_id}")
+        
+        # Process the incident notification
+        result = process_incident_notification(incident_id, user_id)
+        
+        logger.info("=== INCIDENT PROCESSING COMPLETED ===")
+        logger.info(f"🎯 Incident ID: {result['incident_id']}")
+        logger.info(f"👤 User ID: {result['user_id']}")
+        logger.info(f"✅ Status: {result['status']}")
+        logger.info(f"🔧 Action: {result['action_taken']}")
+        logger.info(f"📧 Email sent: {result['email_sent']}")
+        logger.info(f"📝 Marked processed: {result['marked_processed']}")
+        logger.info(f"🗑️ Schedule cleaned: {result['schedule_cleaned']}")
+        logger.info(f"💬 Message: {result['message']}")
         
         return {
             'statusCode': 200,
-            'body': json.dumps(total_stats)
+            'body': json.dumps(result)
         }
         
     except Exception as e:
@@ -387,6 +452,6 @@ def lambda_handler(event, context):
             'statusCode': 500,
             'body': json.dumps({
                 'error': str(e),
-                'message': 'Technician notification processing failed'
+                'message': 'Incident notification processing failed'
             })
         } 

@@ -8,10 +8,10 @@ table = dynamodb.Table('Moose-DDB')  # Replace with your table name
 def delete_items_with_system_prefix_and_status():
     # Initial scan request with both conditions
     response = table.scan(
-        FilterExpression='begins_with(PK, :prefix) AND SK = :sk_value',
+        FilterExpression='begins_with(PK, :prefix)',
             ExpressionAttributeValues={
-                ':prefix': 'System',
-                ':sk_value': 'STATUS'
+                ':prefix': 'Incident',
+
         }
     )
 
@@ -22,10 +22,10 @@ def delete_items_with_system_prefix_and_status():
     while 'LastEvaluatedKey' in response:
         response = table.scan(
             ExclusiveStartKey=response['LastEvaluatedKey'],
-            FilterExpression='begins_with(PK, :prefix) AND SK = :sk_value',
+            FilterExpression='begins_with(PK, :prefix) ',
             ExpressionAttributeValues={
-                ':prefix': 'System',
-                ':sk_value': 'STATUS'
+                ':prefix': 'Incident',
+
             }
         )
         delete_items(response['Items'])

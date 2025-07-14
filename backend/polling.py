@@ -27,6 +27,7 @@ from botocore.exceptions import ClientError
 from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import botocore.config
 
 # Set up logging
 logging.basicConfig(
@@ -61,7 +62,11 @@ MAX_RETRIES = int(os.environ.get('MAX_RETRIES', '3'))
 EARNINGS_RATE_PER_KWH = 0.40  # $0.40 per kWh
 
 # Initialize DynamoDB client
-dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
+# Configure DynamoDB with larger connection pool for concurrent operations
+dynamodb_config = botocore.config.Config(
+    max_pool_connections=50  # Increase from default 10 to handle concurrent threads
+)
+dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION,config=dynamodb_config)
 table = dynamodb.Table(DYNAMODB_TABLE_NAME)
 
 # Initialize SNS client

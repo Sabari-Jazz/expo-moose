@@ -240,7 +240,7 @@ def create_status_entry(device: Dict[str, Any], pv_system_id: str) -> Dict[str, 
     current_time = datetime.utcnow().isoformat()
     
     status_entry = {
-        "PK": f"Inverter<{device_id}>",
+        "PK": f"Inverter#{device_id}",
         "SK": "STATUS",
         "pvSystemId": pv_system_id,
         "device_id": device_id,
