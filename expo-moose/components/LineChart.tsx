@@ -24,19 +24,23 @@ interface LineChartProps {
 const { width: screenWidth } = Dimensions.get('window');
 
 export const LineChart: React.FC<LineChartProps> = ({ chartData, isDarkMode, colors }) => {
-  // Get icon and color based on data type
-  const getDataTypeConfig = () => {
-    switch (chartData.data_type) {
-      case 'energy_production':
-        return { icon: '⚡', color: '#4CAF50' }; // Green
-      case 'co2_savings':
-        return { icon: '🌱', color: '#2196F3' }; // Blue
-      case 'earnings':
-        return { icon: '💰', color: '#FF9800' }; // Orange
-      default:
-        return { icon: '📊', color: colors.primary };
+  // Format numbers for display (convert to k format if >= 1000)
+  const formatNumber = (value: number): string => {
+    if (value >= 1000) {
+      const kValue = value / 1000;
+      // Format to max 3 digits total
+      if (kValue >= 100) {
+        return `${Math.round(kValue)}k`; // e.g., 123k
+      } else if (kValue >= 10) {
+        return `${kValue.toFixed(1)}k`; // e.g., 12.3k
+      } else {
+        return `${kValue.toFixed(2)}k`; // e.g., 1.23k
+      }
     }
+    return value.toString();
   };
+
+
   
   const { data_points, title, unit, total_value, system_name } = chartData;
   
@@ -99,7 +103,7 @@ export const LineChart: React.FC<LineChartProps> = ({ chartData, isDarkMode, col
   
   const chartPoints = createChartPoints();
   
-  // Create SVG path for the line (simplified)
+  // Create simple line path (simplified)
   const createLinePath = () => {
     if (chartPoints.length === 0) return '';
     
@@ -157,13 +161,13 @@ export const LineChart: React.FC<LineChartProps> = ({ chartData, isDarkMode, col
           {/* Y-axis labels */}
           <View style={styles.yAxisContainer}>
             <Text style={[styles.axisLabel, { color: colors.text + '60' }]}>
-              {maxValue.toFixed(1)}
+              {formatNumber(maxValue)}
             </Text>
             <Text style={[styles.axisLabel, { color: colors.text + '60' }]}>
-              {((maxValue + minValue) / 2).toFixed(1)}
+              {formatNumber((maxValue + minValue) / 2)}
             </Text>
             <Text style={[styles.axisLabel, { color: colors.text + '60' }]}>
-              {minValue.toFixed(1)}
+              {formatNumber(minValue)}
             </Text>
           </View>
           
@@ -211,7 +215,7 @@ export const LineChart: React.FC<LineChartProps> = ({ chartData, isDarkMode, col
                       },
                     ]}
                   >
-                    {point.value.toFixed(1)}
+                    {formatNumber(point.value)}
                   </Text>
                 </View>
               ))}

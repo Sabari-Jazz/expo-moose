@@ -25,6 +25,8 @@ import { getCurrentUser } from "@/utils/cognitoAuth";
 import StatusIcon from "@/components/StatusIcon";
 import SummaryStatusIcon from "@/components/SummaryStatusIcon";
 import UserMenuDrawer from "@/components/UserMenuDrawer";
+import { useSession } from "@/utils/sessionContext";
+import IncidentModal from "@/components/IncidentModal";
 
 interface EnhancedPvSystem {
   id: string;
@@ -41,6 +43,7 @@ interface EnhancedPvSystem {
 
 export default function DashboardScreen() {
   const { isDarkMode, colors } = useTheme();
+  const { incidents, loadIncidents, pendingIncidentsCount, hasShownIncidentsThisSession, markIncidentsAsShown } = useSession();
   const [refreshing, setRefreshing] = useState(false);
   const [allSystems, setAllSystems] = useState<EnhancedPvSystem[]>([]);
   const [filteredSystems, setFilteredSystems] = useState<EnhancedPvSystem[]>([]);
@@ -56,6 +59,7 @@ export default function DashboardScreen() {
     systems?: string[];
   } | null>(null);
   const [userMenuVisible, setUserMenuVisible] = useState(false);
+  const [incidentModalVisible, setIncidentModalVisible] = useState(false);
 
   const SYSTEMS_PER_PAGE = 10;
 
@@ -327,10 +331,17 @@ export default function DashboardScreen() {
     });
   }, []);
 
-  // Initial load
+  // Load all systems data on component mount
   useEffect(() => {
     loadAllSystemsData();
   }, []);
+
+  // Update modal visibility when pending incidents count changes
+  useEffect(() => {
+    if (pendingIncidentsCount > 0 && !incidentModalVisible && !hasShownIncidentsThisSession) {
+      setIncidentModalVisible(true);
+    }
+  }, [pendingIncidentsCount, incidentModalVisible, hasShownIncidentsThisSession]);
 
   // Handle search query changes
   useEffect(() => {
@@ -338,6 +349,7 @@ export default function DashboardScreen() {
   }, [searchQuery, allSystems]);
 
   const navigateToDetail = (pvSystemId: string) => {
+    console.log(`Navigating to detail for system ${pvSystemId}`);
     router.push(`/pv-detail/${pvSystemId}`);
   };
 
@@ -512,24 +524,16 @@ export default function DashboardScreen() {
           style={{ color: colors.text, fontWeight: "700" }}
         >
           Solar Systems
-          {currentUser && currentUser.role !== "admin" && (
+          {currentUser &&  (
             <Text
               variant="titleSmall"
               style={{ color: colors.primary, fontWeight: "400" }}
             >
               {" "}
-              (User Access)
+              (v2.5.1)
             </Text>
           )}
-          {currentUser && currentUser.role === "admin" && (
-            <Text
-              variant="titleSmall"
-              style={{ color: colors.primary, fontWeight: "400" }}
-            >
-              {" "}
-              (Admin)
-            </Text>
-          )}
+          
         </Text>
         <View style={styles.headerButtons}>
           <IconButton
@@ -653,6 +657,16 @@ export default function DashboardScreen() {
         onClose={() => setUserMenuVisible(false)}
         currentUser={currentUser}
       />
+
+      {/* Incident Modal */}
+      <IncidentModal
+        visible={incidentModalVisible}
+        onDismiss={() => {
+          setIncidentModalVisible(false);
+          markIncidentsAsShown();
+        }}
+        incidents={incidents}
+      />
     </SafeAreaView>
   );
 }
@@ -665,13 +679,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "space-between", // Push title left and buttons right
     alignItems: "center",
     marginTop: 8,
   },
   headerButtons: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center", // Changed from flex-start to center
   },
   searchContainer: {
     flexDirection: "row",
@@ -708,6 +722,7 @@ const styles = StyleSheet.create({
   summaryStatusContainer: {
     marginBottom: 8,
     alignItems: "center",
+    width: "100%",
   },
   listContent: {
     paddingHorizontal: 16,

@@ -1,8 +1,9 @@
 import axios from 'axios';
 import { getAuthTokens } from './cognitoAuth';
+import { API_URL } from '@/constants/api';
 
-// Lambda backend URL
-const LAMBDA_API_URL = process.env.LAMBDA_API_URL || 'https://your-lambda-api-url.execute-api.us-east-1.amazonaws.com/dev';
+// Lambda backend URL - use the same URL as your main API
+const LAMBDA_API_URL = process.env.LAMBDA_API_URL || API_URL;
 
 /**
  * Create an authenticated API client for Lambda backend

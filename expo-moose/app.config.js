@@ -9,9 +9,10 @@ export default {
   expo: {
     // --- Basic App Info (Using values from app.config.js primarily) ---
     
-    name: "Moose Solar (Dev)",
+    name: "Moose Solar",
     slug: "moose-solar",
-    version: "2.0.0", // Consider using eas.json appVersionSource: remote
+    //name: "Moose Solar Dev",
+    version: "2.5.1", // Consider using eas.json appVersionSource: remote
     orientation: "portrait",
     scheme: "moose-solar", // Added from app.json
     updates: {
@@ -47,8 +48,9 @@ export default {
     // --- iOS Specific ---
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.sabarijazz.moose.solar.dev",
-      buildNumber: "2.0.0", // Consider using eas build --auto-increment or remote app version source
+      bundleIdentifier: "com.moose.solar",
+    //  bundleIdentifier: "com.moose.solar.dev",
+      buildNumber: "2.5.1", // Consider using eas build --auto-increment or remote app version source
       // Merged infoPlist entries from both files
       infoPlist: {
         // From app.json
@@ -89,7 +91,7 @@ export default {
       // Correct way to handle keyboard behavior (from app.config.js)
       softwareKeyboardLayoutMode: "pan",
       // Note: googleMaps.apiKey and incorrect windowSoftInputMode removed
-      buildNumber: "2.0.0",
+      buildNumber: "2.5.1",
       config: {
         googleMaps: {
           apiKey: process.env.GOOGLE_MAPS_API_KEY,

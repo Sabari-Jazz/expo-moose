@@ -128,20 +128,6 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="feedback"
-        options={{
-          title: "Feedback",
-          tabBarIcon: ({ color, focused }) => (
-            <LocalIonicon
-              name="chatbox"
-              variant={focused ? "" : "-outline"}
-              size={24}
-              color={color}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="chat"
         options={{
           title: "Chat",
@@ -155,6 +141,21 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="feedback"
+        options={{
+          title: "Feedback",
+          tabBarIcon: ({ color, focused }) => (
+            <LocalIonicon
+              name="chatbox"
+              variant={focused ? "" : "-outline"}
+              size={24}
+              color={color}
+            />
+          ),
+        }}
+      />
+      
       
     </Tabs>
   );

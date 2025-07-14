@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+.bun/
+.pnpm/
+.yarn/
+
+# Version control
+.git/
+.gitignore
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# IDE/editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*.log
+
+# Build artifacts
+build/
+dist/
+web-build/
+.expo/
+.expo-shared/
+android/app/build/
+ios/build/
+ios/Pods/
+*.apk
+*.aab
+*.ipa
+
+# Testing & coverage
+__tests__/
+coverage/
+*.test.js
+*.test.ts
+*.test.tsx
+
+# Environment files (keep secrets out)
+.env
+.env.*
+!.env.example
+
+# Miscellaneous
+*.tmp
+*.bak
+*.lock
+npm-debug.log
+yarn-error.log
+expo-symbols/
+
+# Optional: exclude large asset folders if not needed
+# public/
+# assets/
+# static/

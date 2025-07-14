@@ -127,28 +127,6 @@ export default function MapScreen() {
       <View style={styles.headerContainer}>
         <Text variant="headlineSmall" style={{ color: colors.text }}>
           Solar Systems Map
-          {currentUser &&
-            currentUser.role !== "admin" &&
-            accessibleSystemIds.length > 0 && (
-              <Text
-                variant="titleSmall"
-                style={{ color: colors.primary, fontWeight: "400" }}
-              >
-                {" "}
-                (Temp Access v2.0.0)
-              </Text>
-            )}
-            {currentUser &&
-            currentUser.role == "admin" &&
-            accessibleSystemIds.length > 0 && (
-              <Text
-                variant="titleSmall"
-                style={{ color: colors.primary, fontWeight: "400" }}
-              >
-                {" "}
-                (v2.0.0)
-              </Text>
-            )}
         </Text>
         <IconButton
           icon="refresh"

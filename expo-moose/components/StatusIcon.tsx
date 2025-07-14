@@ -1,31 +1,41 @@
 import React, {useEffect, useState, useCallback, useRef} from "react";
-import { StyleSheet, View, Text, ActivityIndicator } from "react-native";
+import { StyleSheet, View, Text, ActivityIndicator, TouchableOpacity } from "react-native";
 import { useTheme } from "@/hooks/useTheme";
 import { getSystemStatus } from "@/api/api";
 import { useSession, SystemStatus } from "@/utils/sessionContext";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 
 interface StatusIconProps {
   systemId?: string;
 }
 
-// Status colors
+// Status colors - only 3 states: green->online, red->error, moon->moon
 const STATUS_COLORS = {
   online: "#4CAF50", // Green
-  green: "#4CAF50", // Green
-  warning: "#FF9800", // Orange
-  error: "#F44336", // Red for errors
-  red: "#F44336", // Red for errors
-  offline: "#9E9E9E", // Gray for offline
+  error: "#F44336", // Red
+  moon: "#9E9E9E", // Grey
 };
 
-// Status text mapping
+// Status text mapping - only 3 states
 const STATUS_TEXT = {
   online: "Online",
-  green: "Online", 
-  warning: "Warning",
   error: "Error",
-  red: "Error",
-  offline: "Offline",
+  moon: "Sleeping",
+};
+
+// Helper function to get display values from SystemStatus
+const getDisplayFromSystemStatus = (status: SystemStatus) => {
+  switch (status) {
+    case "online":
+      return { color: STATUS_COLORS.online, text: STATUS_TEXT.online };
+    case "error":
+      return { color: STATUS_COLORS.error, text: STATUS_TEXT.error };
+    case "moon":
+      return { color: STATUS_COLORS.moon, text: STATUS_TEXT.moon };
+    default:
+      return { color: STATUS_COLORS.moon, text: STATUS_TEXT.moon };
+  }
 };
 
 // Use React.memo to prevent unnecessary re-renders
@@ -33,7 +43,8 @@ const StatusIcon = React.memo(({
   systemId = ""
 }: StatusIconProps) => {
   const { isDarkMode, colors } = useTheme();
-  const { updateSystemStatus } = useSession();
+  const { updateSystemStatus, systemStatuses } = useSession();
+  const router = useRouter();
   const [statusColor, setStatusColor] = useState("");
   const [statusText, setStatusText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -44,12 +55,35 @@ const StatusIcon = React.memo(({
   const lastFetchTime = useRef<number>(0);
   const statusRef = useRef<SystemStatus | null>(null);
   
+  // Initialize status from context if available
+  useEffect(() => {
+    if (!systemId) {
+      setIsLoading(false);
+      return;
+    }
+
+    const contextStatus = systemStatuses[systemId];
+    if (contextStatus) {
+      console.log(`StatusIcon: Using context status for system ${systemId}: ${contextStatus}`);
+      const { color, text } = getDisplayFromSystemStatus(contextStatus);
+      setStatusColor(color);
+      setStatusText(text);
+      setIsLoading(false);
+      statusRef.current = contextStatus;
+    } else {
+      console.log(`StatusIcon: No context status found for system ${systemId}, will fetch from API`);
+      // If no context status, we'll need to fetch from API
+      setIsLoading(true);
+    }
+  }, [systemId, systemStatuses]);
+
   const fetchStatus = useCallback(async (force = false) => {
     if (!isMounted.current || !systemId) return;
     
-    // First fetch should always show loading
-    if (force) {
-      setIsLoading(true);
+    // If we already have a context status and this isn't a forced fetch, skip it
+    if (!force && systemStatuses[systemId] && statusRef.current) {
+      console.log(`StatusIcon: Skipping API call for system ${systemId}, using context status`);
+      return;
     }
     
     // Local throttling - only fetch every 30 seconds unless forced
@@ -62,35 +96,34 @@ const StatusIcon = React.memo(({
     lastFetchTime.current = now;
     
     try {
-      console.log(`StatusIcon: Fetching status for system ${systemId}`);
+      console.log(`StatusIcon: Fetching status from API for system ${systemId}`);
       
       // Get system status from backend API
       const statusData = await getSystemStatus(systemId);
       
       if (!isMounted.current) return;
       
-      const status = statusData?.status || "offline";
-      console.log(`StatusIcon: Received status for system ${systemId}: ${status}`);
+      const status = statusData?.status || "moon";
+      console.log(`StatusIcon: Received API status for system ${systemId}: ${status}`);
       
-      // Set color and text based on status
-      const color = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.offline;
-      const text = STATUS_TEXT[status as keyof typeof STATUS_TEXT] || "Unknown";
+      // Map API status to SystemStatus type - only 3 states
+      let contextStatus: SystemStatus;
+      if (status === "red" || status === "error") {
+        contextStatus = "error";
+      } else if (status === "moon") {
+        contextStatus = "moon";
+      } else if (status === "green" || status === "online") {
+        contextStatus = "online";
+      } else {
+        // Default to moon for unknown statuses
+        contextStatus = "moon";
+      }
       
+      // Get display values
+      const { color, text } = getDisplayFromSystemStatus(contextStatus);
       setStatusColor(color);
       setStatusText(text);
       setIsLoading(false);
-      
-      // Map to SystemStatus for context
-      let contextStatus: SystemStatus = "online";
-      if (status === "red" || status === "error") {
-        contextStatus = "error";
-      } else if (status === "warning") {
-        contextStatus = "warning";
-      } else if (status === "offline") {
-        contextStatus = "offline";
-      } else {
-        contextStatus = "online";
-      }
       
       // Only update system status if it's changed to avoid unnecessary context updates
       if (statusRef.current !== contextStatus) {
@@ -102,29 +135,34 @@ const StatusIcon = React.memo(({
       if (!isMounted.current) return;
       
       console.error("StatusIcon: Error fetching system status:", error);
-      // Default to offline on error
-      setStatusColor(STATUS_COLORS.offline);
-      setStatusText("Offline");
+      // Default to moon on error
+      const { color, text } = getDisplayFromSystemStatus("moon");
+      setStatusColor(color);
+      setStatusText(text);
       setIsLoading(false);
       
       // Only update status if it's changed
-      if (statusRef.current !== "offline" && systemId) {
-        statusRef.current = "offline";
-        updateSystemStatus(systemId, "offline");
+      if (statusRef.current !== "moon" && systemId) {
+        statusRef.current = "moon";
+        updateSystemStatus(systemId, "moon");
       }
     }
-  }, [systemId, updateSystemStatus]);
+  }, [systemId, updateSystemStatus, systemStatuses]);
 
   // Setup effect - runs when component mounts or systemId changes
   useEffect(() => {
     // Mark as mounted
     isMounted.current = true;
     
-    // Initial fetch (forced)
     if (systemId) {
-      fetchStatus(true);
+      // Only fetch from API if we don't have context status
+      const contextStatus = systemStatuses[systemId];
+      if (!contextStatus) {
+        console.log(`StatusIcon: No context status for system ${systemId}, fetching from API`);
+        fetchStatus(true);
+      }
       
-      // Set up interval - but ensure we don't create duplicate intervals
+      // Set up interval for periodic updates (but less frequent since we have context)
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
@@ -132,8 +170,8 @@ const StatusIcon = React.memo(({
       intervalRef.current = setInterval(() => {
         if (!isMounted.current) return;
         fetchStatus(false);
-      }, 2 * 60 * 1000); // 2 minutes - status updates from backend
-      console.log(`StatusIcon: Set up polling for system ${systemId} every 2 minutes`);
+      }, 5 * 60 * 1000); // 5 minutes - longer interval since we have context status
+      console.log(`StatusIcon: Set up polling for system ${systemId} every 5 minutes`);
     } else {
       // No system ID, so we're not going to load anything
       setIsLoading(false);
@@ -151,9 +189,17 @@ const StatusIcon = React.memo(({
         intervalRef.current = null;
       }
     };
-  }, [systemId, fetchStatus]); // Re-run if systemId changes
+  }, [systemId, fetchStatus, systemStatuses]); // Re-run if systemId or systemStatuses changes
 
-  // Show loading indicator while data is being fetched
+  // Handle status icon press to navigate to status details
+  const handleStatusPress = () => {
+    if (systemId) {
+      console.log(`StatusIcon: Navigating to status details for system ${systemId}`);
+      router.push(`/status-detail/${systemId}` as any);
+    }
+  };
+
+  // Show loading indicator only if we don't have any status data
   if (isLoading) {
     return (
       <View style={styles.combinedStatusContainer}>
@@ -166,7 +212,11 @@ const StatusIcon = React.memo(({
 
   // Return the single combined status widget
   return (
-    <View style={styles.combinedStatusContainer}>
+    <TouchableOpacity 
+      style={styles.combinedStatusContainer}
+      onPress={handleStatusPress}
+      activeOpacity={0.7}
+    >
       <View style={styles.statusContainer}>
         <Text style={[
           styles.statusText,
@@ -174,14 +224,23 @@ const StatusIcon = React.memo(({
         ]}>
           {statusText}
         </Text>
-        <View
-          style={[
-            styles.statusIndicator,
-            { backgroundColor: statusColor },
-          ]}
-        />
+        {statusText === "Sleeping" ? (
+          <Ionicons 
+            name="moon" 
+            size={16} 
+            color={statusColor} 
+            style={styles.moonIcon}
+          />
+        ) : (
+          <View
+            style={[
+              styles.statusIndicator,
+              { backgroundColor: statusColor },
+            ]}
+          />
+        )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 });
 
@@ -225,5 +284,9 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 15,
     fontWeight: "600",
+  },
+  moonIcon: {
+    marginLeft: 8,
+    marginRight: 2,
   },
 }); 

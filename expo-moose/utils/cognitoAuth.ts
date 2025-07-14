@@ -10,6 +10,9 @@ import {
   import { API_URL } from '@/constants/api';
   import { registerDeviceWithBackend, deleteDeviceFromBackend } from './deviceManager';
   
+  // Test constant - set to true to enable force sign out behavior
+  const TEST = false;
+  
   // Constants
   export const AUTH_USER_KEY = 'auth_user';
   export const ACCESS_TOKEN_KEY = 'auth_access_token';
@@ -72,22 +75,48 @@ import {
         
         // Handle specific case where user is already signed in
         if (signInError.name === 'UserAlreadyAuthenticatedException') {
-          console.log('User already authenticated, getting current user...');
-          try {
-            return await handleSuccessfulSignIn(username);
-          } catch (currentUserError) {
-            console.error('Error getting current user:', currentUserError);
-            // If getting current user fails, sign out and try again
-            console.log('Signing out and retrying...');
-            await amplifySignOut();
-            // Retry the sign in
-            response = await amplifySignIn({ 
-              username, 
-              password,
-              options: {
-                authFlowType: 'USER_SRP_AUTH'
-              }
-            });
+          if (TEST) {
+            // TEST MODE: Force sign out and retry
+            console.log('User already authenticated, attempting force sign out...');
+            try {
+              // Force clear everything and retry
+              await forceSignOut();
+              console.log('Force sign out completed, retrying sign in...');
+              
+              // Wait a moment for cleanup to complete
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+              // Retry the sign in
+              response = await amplifySignIn({ 
+                username, 
+                password,
+                options: {
+                  authFlowType: 'USER_SRP_AUTH'
+                }
+              });
+            } catch (forceSignOutError) {
+              console.error('Force sign out failed:', forceSignOutError);
+              throw new Error('User session is stuck. Please restart the app and try again.');
+            }
+          } else {
+            // NORMAL MODE: Existing behavior
+            console.log('User already authenticated, getting current user...');
+            try {
+              return await handleSuccessfulSignIn(username);
+            } catch (currentUserError) {
+              console.error('Error getting current user:', currentUserError);
+              // If getting current user fails, sign out and try again
+              console.log('Signing out and retrying...');
+              await amplifySignOut();
+              // Retry the sign in
+              response = await amplifySignIn({ 
+                username, 
+                password,
+                options: {
+                  authFlowType: 'USER_SRP_AUTH'
+                }
+              });
+            }
           }
         } else {
           console.error('Error stack:', signInError.stack);
@@ -192,6 +221,7 @@ import {
           'Content-Type': 'application/json',
         },
       });
+      console.log('User systems response:', response);
 
       if (!response.ok) {
         console.error(`Failed to fetch user systems: ${response.status}`);
@@ -236,7 +266,7 @@ import {
       }
 
       const user: User = {
-        id: userProfile.userId,
+        id:  userId,
         username: userProfile.username,
         name: userProfile.name,
         email: userProfile.email,
@@ -316,15 +346,17 @@ import {
         console.error('Failed to fetch user profile from backend');
         return null;
       }
+      console.log('User PROFILE', userProfile)
 
       const user: User = {
-        id: userProfile.userId, 
+        id: userId, 
         username: userProfile.username,
         name: userProfile.name,
         email: userProfile.email,
         role: userProfile.role,
         systems: userSystems
       };
+      console.log('USER', user)
   
       await save(AUTH_USER_KEY, JSON.stringify(user));
       if (idToken) await save(ID_TOKEN_KEY, idToken);
@@ -407,6 +439,39 @@ import {
       await deleteValueFor(AUTH_USER_KEY);
       await deleteValueFor(ACCESS_TOKEN_KEY);
       await deleteValueFor(ID_TOKEN_KEY);
+    }
+  }
+  
+  /**
+   * Force sign out user - clears all local and Cognito sessions
+   */
+  export async function forceSignOut(): Promise<void> {
+    try {
+      console.log('=== FORCE SIGN OUT INITIATED ===');
+      
+      // Clear local storage first
+      await deleteValueFor(AUTH_USER_KEY);
+      await deleteValueFor(ACCESS_TOKEN_KEY);
+      await deleteValueFor(ID_TOKEN_KEY);
+      console.log('Local storage cleared');
+      
+      // Clear device registration data
+      await deleteValueFor('device_id');
+      await deleteValueFor('expo_push_token');
+      console.log('Device data cleared');
+      
+      // Force Amplify sign out (global sign out)
+      try {
+        await amplifySignOut({ global: true });
+        console.log('Amplify global sign out successful');
+      } catch (amplifyError) {
+        console.log('Amplify sign out failed (continuing anyway):', amplifyError);
+      }
+      
+      console.log('=== FORCE SIGN OUT COMPLETED ===');
+    } catch (error) {
+      console.error('Error during force sign out:', error);
+      // Continue anyway - we want to clear everything possible
     }
   }
   

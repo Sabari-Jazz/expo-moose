@@ -28,11 +28,14 @@ import { Picker } from '@react-native-picker/picker';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import Constants from "expo-constants";
-import { LineChart } from "@/components/LineChart";
+import { LineChart } from "@/components/LineChart2";
+import { BarChart } from "@/components/BarChart2";
+import { API_URL } from "@/constants/api";
 
 // --- API Configuration ---
+
 //const API_URL= 'https://vfcfg6edj6.execute-api.us-east-1.amazonaws.com/api/chat'
-const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
+//const API_URL = "http://10.0.0.210:8000/chat"; // Local backend API endpoint
 //const API_URL = "http://172.17.49.217:8000/chat";
 /*
 const API_URL = 
@@ -100,7 +103,7 @@ const getChatResponse = async (message: string, userId: string, systemId: string
     
     console.log("Sending API request with data:", JSON.stringify(requestData, null, 2));
     
-    const response = await axios.post<ChatResponse>(API_URL, requestData);
+    const response = await axios.post<ChatResponse>(API_URL + "/api/chat", requestData);
     
     console.log("Received response from API:", response.data);
     
@@ -688,11 +691,19 @@ export default function ChatScreen() {
       {/* Render chart outside the message bubble if chart_data is present */}
       {item.chart_data && (
         <View style={styles.chartContainer}>
-          <LineChart 
-            chartData={item.chart_data}
-            isDarkMode={isDarkMode}
-            colors={colors}
-          />
+          {item.chart_data.chart_type === 'bar' ? (
+            <BarChart 
+              chartData={item.chart_data}
+              isDarkMode={isDarkMode}
+              colors={colors}
+            />
+          ) : (
+            <LineChart 
+              chartData={item.chart_data}
+              isDarkMode={isDarkMode}
+              colors={colors}
+            />
+          )}
         </View>
       )}
     </>
@@ -731,30 +742,7 @@ export default function ChatScreen() {
           What would you like to know about your solar system?
         </Text>
 
-        <TouchableOpacity
-          style={[
-            styles.promptButton,
-            { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
-          ]}
-          onPress={() => handlePromptClick(`Tell me about STATE 102 error code${systemText}`)}
-          disabled={isLoading}
-        >
-          <Text style={[styles.promptButtonText, { color: colors.text }]}>
-            Tell me about STATE 102 error code
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.promptButton,
-            { backgroundColor: isDarkMode ? colors.card : "#f0f0f0" },
-          ]}
-          onPress={() => handlePromptClick(`How do I clean my solar panels${systemText}?`)}
-          disabled={isLoading}
-        >
-          <Text style={[styles.promptButtonText, { color: colors.text }]}>
-            How do I clean my solar panels?
-          </Text>
-        </TouchableOpacity>
+
         <TouchableOpacity
           style={[
             styles.promptButton,

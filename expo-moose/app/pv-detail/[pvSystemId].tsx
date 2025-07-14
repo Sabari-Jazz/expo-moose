@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   ScrollView,
   FlatList,
-  Linking,
   TouchableOpacity,
   Alert,
   RefreshControl,
@@ -123,6 +122,7 @@ export default function PvSystemDetailScreen() {
   // State for historical chart data
   const [energyHistData, setEnergyHistData] =
     useState<api.HistoricalDataResponse | null>(null);
+  const [yearlyMonthlyData, setYearlyMonthlyData] = useState<Array<{ month: string, total: number }> | null>(null);
   const [selectedChartPeriod, setSelectedChartPeriod] = useState<
     "day" | "week" | "month" | "year"
   >("day");
@@ -147,12 +147,7 @@ export default function PvSystemDetailScreen() {
   const [consolidatedWeeklyData, setConsolidatedWeeklyData] = useState<any>(null);
   const [consolidatedMonthlyData, setConsolidatedMonthlyData] = useState<any>(null);
   const [consolidatedYearlyData, setConsolidatedYearlyData] = useState<any>(null);
-
-  // Update the existing computed values to use consolidated data when available
-  
-
-  
-
+  const [expectedEarnings, setExpectedEarnings] = useState<api.ExpectedEarningsResponse | null>(null);
 
   // ... existing code for other computed values ...
 
@@ -189,6 +184,89 @@ export default function PvSystemDetailScreen() {
 
   
   // --- Date Helpers ---
+  const createCompleteTimeSeriesForDay = (apiData: any[], startDate: Date): any[] => {
+    // Create a map of existing data points by their timestamps
+    const dataMap = new Map();
+    apiData.forEach(item => {
+      const timestamp = new Date(item.logDateTime).getTime();
+      dataMap.set(timestamp, item);
+    });
+    
+    // Generate all 30-minute intervals from 00:00 to 24:00 (48 intervals)
+    const completeData = [];
+    const currentTime = new Date(startDate);
+    
+    for (let i = 0; i < 48; i++) {
+      const intervalTime = new Date(currentTime);
+      intervalTime.setMinutes(i * 30);
+      
+      const timestamp = intervalTime.getTime();
+      const existingData = dataMap.get(timestamp);
+      
+      if (existingData) {
+        // Use existing data
+        completeData.push(existingData);
+      } else {
+        // Create placeholder with 0 values
+        completeData.push({
+          logDateTime: intervalTime.toISOString(),
+          logDuration: 1800,
+          channels: [
+            {
+              name: "EnergyProductionTotal",
+              value: 0,
+              unit: "Wh"
+            }
+          ]
+        });
+      }
+    }
+    
+    return completeData;
+  };
+
+  const createCompleteWeeklyData = (apiData: any[], startDate: Date): any[] => {
+    // Create a map of existing data points by their date strings
+    const dataMap = new Map();
+    apiData.forEach(item => {
+      const itemDate = new Date(item.logDateTime);
+      const dateKey = itemDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      dataMap.set(dateKey, item);
+    });
+    
+    // Generate all 7 days of the week (Monday to Sunday)
+    const completeData = [];
+    const currentDate = new Date(startDate);
+    
+    for (let i = 0; i < 7; i++) {
+      const dayDate = new Date(currentDate);
+      dayDate.setDate(currentDate.getDate() + i);
+      
+      const dateKey = dayDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      const existingData = dataMap.get(dateKey);
+      
+      if (existingData) {
+        // Use existing data
+        completeData.push(existingData);
+      } else {
+        // Create placeholder with 0 values for missing days
+        completeData.push({
+          logDateTime: dayDate.toISOString().split('T')[0] + 'T00:00:00Z',
+          logDuration: 86400, // Duration for a day in seconds
+          channels: [
+            {
+              name: "EnergyProductionTotal",
+              value: 0,
+              unit: "Wh"
+            }
+          ]
+        });
+      }
+    }
+    
+    return completeData;
+  };
+
   const getShortDateString = (date: Date): string => {
     return date.toISOString().split("T")[0]; // YYYY-MM-DD
   };
@@ -294,6 +372,7 @@ export default function PvSystemDetailScreen() {
         consolidatedMonthly,
         consolidatedYearly,
         devs,
+        expectedEarningsData,
       ] = await Promise.allSettled([
         api.getPvSystemDetails(pvSystemId),
         api.getConsolidatedDailyData(pvSystemId, todayDateString), // Use EST date instead of hardcoded
@@ -301,6 +380,7 @@ export default function PvSystemDetailScreen() {
         api.getConsolidatedMonthlyData(pvSystemId, getShortDateString(monthFromDate).substring(0, 7)), // YYYY-MM format
         api.getConsolidatedYearlyData(pvSystemId, getShortDateString(yearFromDate).substring(0, 4)), // YYYY format
         api.getPvSystemDevices(pvSystemId),
+        api.getSystemExpectedEarnings(pvSystemId),
       ]);
 
       // Set State based on results
@@ -364,6 +444,15 @@ export default function PvSystemDetailScreen() {
       if (devs.status === "fulfilled")
         setDevices(devs.value ?? []); // Default to empty array if null
       else console.error("Failed Devices:", devs.reason);
+      // Process expected earnings data
+      if (expectedEarningsData.status === "fulfilled") {
+        const earningsData = expectedEarningsData.value;
+        console.log("Expected Earnings Data:", earningsData);
+        setExpectedEarnings(earningsData);
+      } else {
+        console.error("Failed Expected Earnings:", expectedEarningsData.reason);
+        setExpectedEarnings(null);
+      }
 
     } catch (err) {
       console.error("Error fetching PV system data:", err);
@@ -386,6 +475,7 @@ export default function PvSystemDetailScreen() {
 
     setChartLoading(true);
     setEnergyHistData(null); // Clear previous data
+    setYearlyMonthlyData(null); // Clear previous yearly data
 
     try {
       const now = new Date();
@@ -395,15 +485,71 @@ export default function PvSystemDetailScreen() {
 
       console.log(`Fetching energy data for ${period} view`);
 
-      if (period === "day") {
-        // For day view, use historical data API for more granular 24-hour data
-        fromDate.setHours(now.getHours() - 24); // Set 'from' date to 24 hours ago
+      if (period === "year") {
+        // Clear yearly data when switching to other periods
+        setYearlyMonthlyData(null);
+        
+        // For yearly view, get 12 months of aggregated data starting from 12 months ago
+        const currentDate = new Date();
+        const startDate = new Date(currentDate);
+        startDate.setMonth(startDate.getMonth() - 11); // Go back 11 months to get 12 months total
+        
+        const fromStr = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`; // YYYY-MM format
+        const durationMonths = 12;
+
+        console.log(`Fetching yearly aggregated data from ${fromStr} for ${durationMonths} months`);
+
+        try {
+          const energyData = await api.getPvSystemAggregatedData(
+            pvSystemId as string,
+            {
+              from: fromStr,
+              duration: durationMonths,
+              channel: "EnergyProductionTotal",
+            }
+          );
+
+          if (energyData && energyData.data && energyData.data.length > 0) {
+                         // Process the monthly data for yearly view
+             const processedData: Array<{ month: string, total: number }> = energyData.data.map((item) => {
+               const date = new Date(item.logDateTime);
+               const month = String(date.getMonth() + 1).padStart(2, '0'); // 01, 02, etc.
+               const year = String(date.getFullYear()).slice(-2); // 24 from 2024
+               const energyValue = findChannelValue(item.channels, "EnergyProductionTotal");
+               const total = energyValue !== null ? Math.max(0, energyValue / 1000) : 0; // Convert Wh to kWh
+
+               return {
+                 month: `${month}/${year}`,
+                 total: total
+               };
+             });
+
+            console.log(`Retrieved ${processedData.length} monthly data points for yearly chart`);
+            setYearlyMonthlyData(processedData);
+            setEnergyHistData(null); // Clear historical data for yearly view
+          } else {
+            console.log(`No yearly data returned`);
+            setYearlyMonthlyData(null);
+            setEnergyHistData(null);
+          }
+        } catch (err) {
+          console.error(`Failed to fetch yearly aggregated data:`, err);
+          setYearlyMonthlyData(null);
+          setEnergyHistData(null);
+        }
+      } else if (period === "day") {
+        // Clear yearly data when switching to other periods
+        setYearlyMonthlyData(null);
+        
+        // For day view, get data from 00:00 of current day to 24:00 (end of day)
+        fromDate.setHours(0, 0, 0, 0); // Set to start of current day (00:00)
+        toDate.setHours(24, 0, 0, 0); // Set to end of current day (24:00 = 00:00 next day)
 
         // Format dates correctly for the histdata API (ISO 8601)
         const fromStr = getIsoDateString(fromDate);
         const toStr = getIsoDateString(toDate);
 
-        console.log(`Fetching historical data from ${fromStr} to ${toStr}`);
+        console.log(`🕐 DAILY CHART - Fetching data from 00:00 to 24:00 of current day: ${fromStr} to ${toStr}`);
 
         try {
           // Call getPvSystemHistoricalData instead of getPvSystemAggregatedData
@@ -418,15 +564,35 @@ export default function PvSystemDetailScreen() {
             }
           );
 
-          if (energyData && energyData.data && energyData.data.length > 0) {
-            // Set the state directly with the HistoricalDataResponse
-            setEnergyHistData(energyData);
-          console.log(
-              `Retrieved ${energyData.data.length} data points for ${period} energy chart`
-          );
-        } else {
-            console.log(`No historical data returned for ${period} view`);
-            setEnergyHistData(null);
+          console.log('🕐 DAILY CHART - Raw API response:', energyData);
+
+          // For day view, create complete time series from 00:00 to 24:00 and fill missing slots
+          if (period === "day") {
+            console.log(`🕐 DAILY CHART - Original API data points: ${energyData?.data?.length || 0}`);
+            const completeTimeData = createCompleteTimeSeriesForDay(energyData?.data || [], fromDate);
+            const completeEnergyData = {
+              ...energyData,
+              data: completeTimeData
+            };
+            setEnergyHistData(completeEnergyData);
+            console.log(`🕐 DAILY CHART - Created complete time series with ${completeTimeData.length} data points (should be 48)`);
+          } else {
+            if (energyData && energyData.data && energyData.data.length > 0) {
+              // Set the state directly with the HistoricalDataResponse
+              setEnergyHistData(energyData);
+              console.log(`🕐 DAILY CHART - Retrieved ${energyData.data.length} data points for ${period} energy chart`);
+              console.log('🕐 DAILY CHART - First 5 data points:', energyData.data.slice(0, 5));
+              console.log('🕐 DAILY CHART - Last 5 data points:', energyData.data.slice(-5));
+              
+              // Log timestamp range
+              const firstTimestamp = energyData.data[0]?.logDateTime;
+              const lastTimestamp = energyData.data[energyData.data.length - 1]?.logDateTime;
+              console.log('🕐 DAILY CHART - Time range:', { firstTimestamp, lastTimestamp });
+              
+            } else {
+              console.log(`🕐 DAILY CHART - No historical data returned for ${period} view`);
+              setEnergyHistData(null);
+            }
           }
         } catch (err) {
           console.error(
@@ -436,19 +602,26 @@ export default function PvSystemDetailScreen() {
           setEnergyHistData(null);
         }
       } else {
+        // Clear yearly data when switching to other periods
+        setYearlyMonthlyData(null);
+        
         // Calendar-based period calculations
         if (period === "week") {
           // Find Monday of current week
           fromDate = getFirstDayOfWeek(new Date());
-          durationDays = Math.floor((now.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          durationDays = 7; // Always fetch full week (Monday to Sunday)
         } else if (period === "month") {
-          // Find 1st of current month
-          fromDate = getFirstDayOfMonth(new Date());
-          durationDays = Math.floor((now.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          // For monthly view, we want 5 weeks of data (35 days)
+          // Find the Monday of 4 weeks ago (so we get 5 weeks total including current partial week)
+          const currentMonday = getFirstDayOfWeek(new Date());
+          fromDate = new Date(currentMonday);
+          fromDate.setDate(fromDate.getDate() - 28); // Go back 4 weeks (28 days)
+          durationDays = 35; // 5 weeks worth of data
         } else {
-          // Find January 1st of current year
-          fromDate = getFirstDayOfYear(new Date());
-          durationDays = Math.floor((now.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          // For yearly view, we'll use consolidated monthly data API calls instead
+          // This will be handled separately in the chart processing
+          fromDate = new Date(); // Not used for yearly view
+          durationDays = 1; // Not used for yearly view
         }
 
         // Format date string for API
@@ -487,7 +660,19 @@ export default function PvSystemDetailScreen() {
               `Retrieved ${adaptedEnergyData.data.length} data points for ${period} energy chart`
             );
 
-            setEnergyHistData(adaptedEnergyData);
+            // For weekly view, create complete week data with all 7 days
+            if (period === "week") {
+              console.log(`📅 WEEKLY CHART - Original API data points: ${adaptedEnergyData.data.length}`);
+              const completeWeekData = createCompleteWeeklyData(adaptedEnergyData.data, fromDate);
+              const completeWeeklyEnergyData = {
+                ...adaptedEnergyData,
+                data: completeWeekData
+              };
+              setEnergyHistData(completeWeeklyEnergyData);
+              console.log(`📅 WEEKLY CHART - Created complete week with ${completeWeekData.length} days (should be 7)`);
+            } else {
+              setEnergyHistData(adaptedEnergyData);
+            }
           } else {
             console.log(`No data returned for ${period} view`);
             setEnergyHistData(null);
@@ -579,11 +764,11 @@ export default function PvSystemDetailScreen() {
         },
         {
           label: "Earnings",
-          value: "$" +extractEarningsFromConsolidatedData(consolidatedDailyData)
+          value: "$" + extractEarningsFromConsolidatedData(consolidatedDailyData)
         },
         {
           label: "Expected Earnings",
-          value: `$${(10.00).toFixed(2)}`,
+          value: `$${(expectedEarnings?.earnings_avg ?? 0).toFixed(2)}`,
         },
       ],
     },
@@ -608,11 +793,11 @@ export default function PvSystemDetailScreen() {
         },
         {
           label: "Earnings",
-          value: extractEarningsFromConsolidatedData(consolidatedWeeklyData) + " $"
+          value: "$" + extractEarningsFromConsolidatedData(consolidatedWeeklyData)
         },
         {
           label: "Expected Earnings",
-          value: `$${(70.00).toFixed(2)}`,
+          value: `$${((expectedEarnings?.earnings_avg ?? 0) * 7).toFixed(2)}`
         },
       ],
     },
@@ -637,11 +822,11 @@ export default function PvSystemDetailScreen() {
         },
         {
           label: "Earnings",
-          value: extractEarningsFromConsolidatedData(consolidatedMonthlyData) + " $"
+          value: "$" + extractEarningsFromConsolidatedData(consolidatedMonthlyData) 
         },
         {
           label: "Expected Earnings",
-          value: `$${(300.00).toFixed(2)}`,
+          value: `$${((expectedEarnings?.earnings_avg ?? 0) * 30).toFixed(2)}`
         },
       ],
     },
@@ -666,11 +851,11 @@ export default function PvSystemDetailScreen() {
         },
         {
           label: "Earnings",
-          value: extractEarningsFromConsolidatedData(consolidatedYearlyData) + " $" 
+          value: "$" + extractEarningsFromConsolidatedData(consolidatedYearlyData)  
         },
         {
           label: "Expected Earnings",
-          value: `$${(3650.00).toFixed(2)}`,
+          value: `$${((expectedEarnings?.earnings_avg ?? 0) * 365).toFixed(2)}`
         },
       ],
     },
@@ -1033,30 +1218,54 @@ export default function PvSystemDetailScreen() {
       );
     }
 
-    if (
-      !energyHistData ||
-      !energyHistData.data ||
-      energyHistData.data.length === 0
-    ) {
-      return (
-        <View style={styles.chartNoDataContainer}>
-          <Ionicons
-            name="bar-chart-outline"
-            size={48}
-            color={isDarkMode ? "#888" : "#aaaaaa"}
-          />
-          <ThemedText style={styles.chartNoDataText}>
-            No energy data available for this period
-          </ThemedText>
-        </View>
-      );
-    }
+         // Handle yearly data differently
+     if (selectedChartPeriod === "year") {
+       if (!yearlyMonthlyData || yearlyMonthlyData.length === 0) {
+         return (
+           <View style={styles.chartNoDataContainer}>
+             <Ionicons
+               name="bar-chart-outline"
+               size={48}
+               color={isDarkMode ? "#888" : "#aaaaaa"}
+             />
+             <ThemedText style={styles.chartNoDataText}>
+               No yearly data available
+             </ThemedText>
+           </View>
+         );
+       }
+     } else {
+       if (
+         !energyHistData ||
+         !energyHistData.data ||
+         energyHistData.data.length === 0
+       ) {
+         return (
+           <View style={styles.chartNoDataContainer}>
+             <Ionicons
+               name="bar-chart-outline"
+               size={48}
+               color={isDarkMode ? "#888" : "#aaaaaa"}
+             />
+             <ThemedText style={styles.chartNoDataText}>
+               No energy data available for this period
+             </ThemedText>
+           </View>
+         );
+       }
+     }
 
-    // Sort data by date to ensure chronological order
-    const sortedData = [...energyHistData.data].sort(
-      (a, b) =>
-        new Date(a.logDateTime).getTime() - new Date(b.logDateTime).getTime()
-    );
+         // Sort data by date to ensure chronological order (only for non-yearly views)
+     const sortedData = selectedChartPeriod === "year" ? [] : [...energyHistData!.data].sort(
+       (a, b) =>
+         new Date(a.logDateTime).getTime() - new Date(b.logDateTime).getTime()
+     );
+     
+     // Log data for daily chart
+     if (selectedChartPeriod === "day") {
+       console.log('🕐 DAILY CHART - Sorted data for rendering:', sortedData);
+       console.log('🕐 DAILY CHART - Data count after sorting:', sortedData.length);
+     }
 
     // Format labels based on period type
     const getFormattedLabel = (
@@ -1067,7 +1276,7 @@ export default function PvSystemDetailScreen() {
       const date = new Date(dateStr);
 
       // Skip some labels for better spacing when we have many data points
-      if (total > 12 && index % Math.ceil(total / 6) !== 0) {
+      if (total > 12 && index % Math.ceil(total / 4) !== 0) {
         return "";
         }
 
@@ -1075,14 +1284,13 @@ export default function PvSystemDetailScreen() {
         // Format for more granular time data in day view (hh:mm format)
         const hours = date.getHours();
         const minutes = date.getMinutes();
-        // Show hours with leading zero and only show minutes if non-zero
-        return (
-          hours.toString().padStart(2, "0") +
-          (minutes > 0 ? `:${minutes.toString().padStart(2, "0")}` : "")
-        );
-      } else if (selectedChartPeriod === "week") {
-        return date.getDate() + "/" + (date.getMonth() + 1);
-      } else if (selectedChartPeriod === "month") {
+        // Always show in HH:MM format
+        return hours.toString().padStart(2, "0") + ":" + minutes.toString().padStart(2, "0");
+             } else if (selectedChartPeriod === "week") {
+              console.log('DATE123', date);
+         const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+         return weekdays[date.getUTCDay()];
+       } else if (selectedChartPeriod === "month") {
         return date.getDate() + "/" + (date.getMonth() + 1);
       } else {
         // year
@@ -1090,45 +1298,140 @@ export default function PvSystemDetailScreen() {
         }
     };
 
-    // Process data for the chart
-    // Process data for the chart
-const validData = sortedData.filter(
-  (item) => !isNaN(new Date(item.logDateTime).getTime())
-);
-
-// Create gradient configuration
-
-
-const chartData = {
-  labels: validData.map((item, index) =>
-    getFormattedLabel(item.logDateTime, index, validData.length)
-  ),
-  datasets: [
-    {
-      data: validData.map((item) => {
-        const value = findChannelValue(
-          item.channels,
-          "EnergyProductionTotal"
+         // Process data for the chart
+          let chartData;
+     
+     if (selectedChartPeriod === "year") {
+       // Use yearly monthly data
+       chartData = {
+         labels: yearlyMonthlyData!.map((item, index) => {
+           // Only show labels for 1st, 4th, 8th, and 12th months (indices 0, 3, 7, 11)
+           if (index === 0 || index === 3 || index === 7 || index === 11) {
+             return item.month;
+           }
+           return ""; // Empty string for months we don't want to show
+         }),
+         datasets: [
+           {
+             data: yearlyMonthlyData!.map(item => item.total),
+             color: (opacity = 1) => `rgba(255, 122, 69, ${opacity})`,
+             strokeWidth: 3,
+             withDots: false,
+           },
+         ],
+       };
+     } else if (selectedChartPeriod === "month") {
+        // Special handling for monthly view (5 weeks of data)
+        const validData = sortedData.filter(
+          (item) => !isNaN(new Date(item.logDateTime).getTime())
         );
-
-        // For day view with historical data, we should properly handle the values
-        if (selectedChartPeriod === "day" && value !== null) {
-          // Historical data might be in Wh, convert to kWh
-          return Math.max(0, value / 1000);
-        } else if (value !== null) {
-          // For other periods, use the existing conversion
-          return Math.max(0, value / 1000); // Convert to kWh
-        } else {
-          return 0;
+        
+        // Group daily data into 5 weekly buckets
+        interface WeeklyBucket {
+          total: number;
+          startDate: Date;
+          endDate: Date;
         }
-      }),
-      color: (opacity = 1) => `rgba(255, 122, 69, ${opacity})`, // Vibrant orange line color
-      strokeWidth: 3,
-      // Add dots for fewer data points, hide them when there are many
-      withDots: false,
-    },
-  ],
-};
+        
+        const weeklyBuckets: WeeklyBucket[] = [];
+        
+        // Calculate the start of each week (Monday) and create buckets
+        const currentMonday = getFirstDayOfWeek(new Date());
+        for (let i = 0; i < 5; i++) {
+          const weekStart = new Date(currentMonday);
+          weekStart.setDate(weekStart.getDate() - (4 - i) * 7); // Go back 4, 3, 2, 1, 0 weeks
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekEnd.getDate() + 6); // Sunday of that week
+          
+          weeklyBuckets.push({
+            total: 0,
+            startDate: weekStart,
+            endDate: weekEnd
+          });
+        }
+        
+        // Aggregate daily data into weekly totals
+        validData.forEach((item) => {
+          const itemDate = new Date(item.logDateTime);
+          const value = findChannelValue(item.channels, "EnergyProductionTotal");
+          const kwhValue = value !== null ? Math.max(0, value / 1000) : 0;
+          
+          // Find which week this day belongs to
+          for (let i = 0; i < 5; i++) {
+            if (itemDate >= weeklyBuckets[i].startDate && itemDate <= weeklyBuckets[i].endDate) {
+              weeklyBuckets[i].total += kwhValue;
+              break;
+            }
+          }
+        });
+        
+        // Create chart data with week labels
+        chartData = {
+          labels: weeklyBuckets.map((bucket) => {
+            const startMonth = bucket.startDate.getMonth() + 1;
+            const startDay = bucket.startDate.getDate();
+            const endMonth = bucket.endDate.getMonth() + 1;
+            const endDay = bucket.endDate.getDate();
+            
+            if (startMonth === endMonth) {
+              return `${startMonth}/${startDay}-${endDay}`;
+            } else {
+              return `${startMonth}/${startDay}-${endMonth}/${endDay}`;
+            }
+          }),
+          datasets: [
+            {
+              data: weeklyBuckets.map(bucket => bucket.total),
+              color: (opacity = 1) => `rgba(255, 122, 69, ${opacity})`,
+              strokeWidth: 3,
+              withDots: false,
+            },
+          ],
+        };
+     } else {
+       // Original processing for other periods
+       const validData = sortedData.filter(
+         (item) => !isNaN(new Date(item.logDateTime).getTime())
+       );
+       
+       chartData = {
+         labels: validData.map((item, index) =>
+           getFormattedLabel(item.logDateTime, index, validData.length)
+         ),
+         datasets: [
+           {
+             data: validData.map((item) => {
+               const value = findChannelValue(
+                 item.channels,
+                 "EnergyProductionTotal"
+               );
+       
+               // For day view with historical data, we should properly handle the values
+               if (selectedChartPeriod === "day" && value !== null) {
+                 // Historical data might be in Wh, convert to kWh
+                 return Math.max(0, value / 1000);
+               } else if (value !== null) {
+                 // For other periods, use the existing conversion
+                 return Math.max(0, value / 1000); // Convert to kWh
+               } else {
+                 return 0;
+               }
+             }),
+             color: (opacity = 1) => `rgba(255, 122, 69, ${opacity})`, // Vibrant orange line color
+             strokeWidth: 3,
+             // Add dots for fewer data points, hide them when there are many
+             withDots: false,
+           },
+         ],
+       };
+     }
+
+     // Log final chart data for daily view
+     if (selectedChartPeriod === "day") {
+       console.log('🕐 DAILY CHART - Final chart data structure:', chartData);
+       console.log('🕐 DAILY CHART - Chart labels:', chartData.labels);
+       console.log('🕐 DAILY CHART - Chart values:', chartData.datasets[0].data);
+     }
 
 const chartConfig = {
   backgroundGradientFrom: isDarkMode ? colors.card : "#fff",
@@ -1145,7 +1448,7 @@ const chartConfig = {
       : `rgba(0, 0, 0, ${opacity})`,
 
   propsForLabels: {
-    fontSize: 10,
+    fontSize: selectedChartPeriod === "year" ? 8.5 : 10,
     fontWeight: "400",
   },
 
@@ -1155,10 +1458,14 @@ const chartConfig = {
     strokeWidth: 1,
   },
 
- 
+  barPercentage: selectedChartPeriod === "year" ? 0.55 : selectedChartPeriod === "week" ? 0.75 : 1,
 
   formatYLabel: (value: string) => {
     const num = parseFloat(value);
+    if (num >= 1000) {
+      const kValue = num / 1000;
+      return kValue % 1 === 0 ? `${kValue}k` : `${kValue.toFixed(1)}k`;
+    }
     return num < 10 ? num.toFixed(1) : Math.round(num).toString();
   },
 
@@ -1171,15 +1478,15 @@ const chartConfig = {
  
 };
 
-// Determine chart title based on period
-const chartTitle =
-  selectedChartPeriod === "day"
-    ? "Daily Energy Production (kWh)"
-    : selectedChartPeriod === "week"
-    ? "Weekly Energy Production (kWh)"
-    : selectedChartPeriod === "month"
-    ? "Monthly Energy Production (kWh)"
-    : "Yearly Energy Production (kWh)";
+ // Determine chart title based on period
+ const chartTitle =
+   selectedChartPeriod === "day"
+     ? "Daily Power Flow (kW)"
+     : selectedChartPeriod === "week"
+     ? "Weekly Energy Production (kWh)"
+     : selectedChartPeriod === "month"
+     ? "Monthly Energy Production (5 Weeks)"
+     : "Yearly Energy Production (12 Months)";
 
 
 
@@ -1196,23 +1503,40 @@ return (
      
     </View>
     {energySectionWidth !== null && (
-      <LineChart
-        data={chartData}
-        width={energySectionWidth}
-        height={screenHeight * 0.5}
-        chartConfig={chartConfig}
-        bezier
-        withShadow={true}
-        style={styles.chart}
-        withVerticalLines={true}
-        withHorizontalLines={true}
-        fromZero={true}
-        yAxisSuffix=" kWh"
-        withInnerLines={true}
-        segments={5}
-        yAxisInterval={1}
-        
-      />
+      selectedChartPeriod === "week" || selectedChartPeriod === "month" || selectedChartPeriod === "year" ? (
+        <BarChart
+          data={chartData}
+          width={energySectionWidth}
+          height={screenHeight * 0.5}
+          chartConfig={chartConfig}
+          style={styles.chart}
+          yAxisLabel=""
+          fromZero={true}
+          yAxisSuffix=" kWh"
+          withInnerLines={true}
+          segments={5}
+          yAxisInterval={1}
+          showBarTops={false}
+          showValuesOnTopOfBars={false}
+        />
+      ) : (
+        <LineChart
+          data={chartData}
+          width={energySectionWidth}
+          height={screenHeight * 0.5}
+          chartConfig={chartConfig}
+          bezier
+          withShadow={true}
+          style={styles.chart}
+          withVerticalLines={true}
+          withHorizontalLines={true}
+          fromZero={true}
+          yAxisSuffix=" kW"
+          withInnerLines={true}
+          segments={5}
+          yAxisInterval={1}
+        />
+      )
     )}
       </View>
     );
@@ -1487,9 +1811,11 @@ return (
             <WeatherWidget pvSystemId={pvSystemId}/>
 
             {/* Power Flow Diagram */}
+            {/*
             <Animated.View entering={FadeInUp.delay(150).springify()}>
               <PowerFlowDiagram />
             </Animated.View>
+            */}
           </>
         )}
 
@@ -1500,7 +1826,7 @@ return (
             <Animated.View
               entering={FadeInUp.delay(100).springify()}
               style={[
-                styles.section,
+                styles.section2,
                 { backgroundColor: isDarkMode ? colors.card : "#fff" },
                 {marginTop: 15}
               ]}
@@ -1732,6 +2058,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   section: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 12,
+    // Shadow
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  section2: {
     marginHorizontal: 16,
     marginBottom: 16,
     padding: 16,
@@ -2029,7 +2367,7 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     borderRadius: 8,
     paddingTop: 16,
-  //  paddingVertical: 16,
+   // paddingVertical: 16,
     marginTop: 8,
   //  flex: 1,
   },

@@ -329,7 +329,7 @@ export default function LoginPage() {
                     { color: isDarkMode ? "#aaa" : "#555" },
                   ]}
                 >
-                  • User: username: ketan, password: pass
+                  • User: username: ketan, password: password
                 </Text>
               </View>
             </Surface>

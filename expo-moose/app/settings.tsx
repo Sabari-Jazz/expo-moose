@@ -28,10 +28,13 @@ import {
 } from "@/utils/auth";
 import UserSystemAccessTable from "@/components/UserSystemAccessTable";
 import NotificationSettings from "@/components/NotificationSettings";
+import IncidentsList from "@/components/IncidentsList";
+import { useSession } from "@/utils/sessionContext";
 import * as api from "@/api/api";
 
 export default function SettingsScreen() {
   const { isDarkMode, colors } = useTheme();
+  const { incidents, loadIncidents } = useSession();
   const insets = useSafeAreaInsets();
   const [logoutDialogVisible, setLogoutDialogVisible] = useState(false);
   const [userData, setUserData] = useState<any>(null);
@@ -267,6 +270,20 @@ export default function SettingsScreen() {
           </Text>
 
           <NotificationSettings />
+        </View>
+
+        <Divider style={{ marginVertical: 16 }} />
+
+        {/* Incidents Section */}
+        <View style={styles.section}>
+          <Text
+            variant="titleMedium"
+            style={[styles.sectionTitle, { color: colors.text }]}
+          >
+            Incidents
+          </Text>
+
+          <IncidentsList incidents={incidents} />
         </View>
 
         <Divider style={{ marginVertical: 16 }} />

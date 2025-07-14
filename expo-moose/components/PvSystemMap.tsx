@@ -11,7 +11,7 @@ import {
   Modal,
 } from "react-native";
 import MapView, { Marker, Callout, PROVIDER_GOOGLE } from "react-native-maps";
-import { getSystemProfile, getConsolidatedDailyData } from "@/api/api";
+import { getSystemProfile, getConsolidatedDailyData, getSystemStatus } from "@/api/api";
 import { PvSystem } from "./PvSystemList";
 import {
   geocodeAddress,
@@ -93,7 +93,7 @@ export default function PvSystemMap({
   // Simplified color scheme
   const onlineColor = "#4CAF50"; // Green for functioning
   const offlineColor = "#F44336"; // Red for non-functioning
-  const warningColor = "#FF9800"; // Orange for warning state
+  const warningColor = "#FF9800";
 
   // Get API key from props or environment variables
   const apiKey =
@@ -115,19 +115,19 @@ export default function PvSystemMap({
     }
   }, [apiKey]);
 
-  // Function to get color based on status
+  // Function to get color based on status - Updated to use STATUS_COLORS
   const getStatusColor = (
     status: "online" | "warning" | "offline" | undefined
   ) => {
     switch (status) {
       case "online":
-        return onlineColor;
+        return STATUS_COLORS.online;
       case "warning":
-        return warningColor;
+        return STATUS_COLORS.warning;
       case "offline":
-        return offlineColor;
+        return STATUS_COLORS.offline;
       default:
-        return onlineColor;
+        return STATUS_COLORS.online;
     }
   };
 
@@ -158,27 +158,55 @@ export default function PvSystemMap({
     }
   };
 
-  // get system status from DynamoDB STATUS record (much faster than consolidated daily data)
+  // Status colors - EXACT SAME as StatusIcon.tsx
+  const STATUS_COLORS = {
+    online: "#4CAF50", // Green
+    green: "#4CAF50", // Green
+    warning: "#FF9800", // Orange
+    error: "#F44336", // Red for errors
+    red: "#F44336", // Red for errors
+    offline: "#9E9E9E", // Gray for offline
+  };
+
+  // Status text mapping - EXACT SAME as StatusIcon.tsx
+  const STATUS_TEXT = {
+    online: "Online",
+    green: "Online", 
+    warning: "Warning",
+    error: "Error",
+    red: "Error",
+    offline: "Offline",
+  };
+
+  // get system status - EXACT SAME implementation as StatusIcon.tsx
   const getStatus = async(systemId: string): Promise<"online" | "warning" | "offline"> => {
     try {
-      // Use the existing API endpoint that gets STATUS record from DynamoDB
-      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL || 'http://10.0.0.210:8000'}/api/systems/${systemId}/status`);
+      console.log(`PvSystemMap: Fetching status for system ${systemId}`);
       
-      if (!response.ok) {
-        console.warn(`Failed to get status for system ${systemId}: ${response.status}`);
+      // Get system status from backend API - EXACT SAME as StatusIcon.tsx
+      const statusData = await getSystemStatus(systemId);
+      
+      const status = statusData?.status || "offline";
+      console.log(`PvSystemMap: Received status for system ${systemId}: ${status}`);
+      
+      // Set color and text based on status - EXACT SAME logic as StatusIcon.tsx
+      const color = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.offline;
+      const text = STATUS_TEXT[status as keyof typeof STATUS_TEXT] || "Unknown";
+      
+      // Map to return type - EXACT SAME logic as StatusIcon.tsx
+      if (status === "red" || status === "error") {
+        return "offline"; // Map error to offline for map display
+      } else if (status === "warning") {
+        return "warning";
+      } else if (status === "offline") {
         return "offline";
+      } else {
+        return "online"; // covers "online", "green", and any other status
       }
       
-      const statusData = await response.json();
-      const status = statusData.status || "offline";
-      
-      // Map the status to our expected values
-      if (status === "online" || status === "green") return "online";
-      if (status === "warning" || status === "yellow") return "warning";
-      return "offline"; // covers "offline", "red", or any other status
-      
     } catch (error) {
-      console.warn(`Failed to get status for system ${systemId}:`, error);
+      console.error("PvSystemMap: Error fetching system status:", error);
+      // Default to offline on error - EXACT SAME as StatusIcon.tsx
       return "offline";
     }
   };

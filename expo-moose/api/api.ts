@@ -692,6 +692,23 @@ export const getSystemProfile = async (pvSystemId: string): Promise<any> => {
     }
 };
 
+export interface ExpectedEarningsResponse {
+    production_avg: number;
+    earnings_avg: number;
+    co2_avg: number;
+    days_used: number;
+}
+
+export const getSystemExpectedEarnings = async (pvSystemId: string): Promise<ExpectedEarningsResponse> => {
+    if (!pvSystemId) throw new Error("pvSystemId is required for getSystemExpectedEarnings");
+    try {
+        return await localApiRequest<ExpectedEarningsResponse>(`api/systems/${pvSystemId}/expected-earnings`, 'GET');
+    } catch (error) {
+        console.error(`Failed to get expected earnings for PV system ${pvSystemId}`, error);
+        throw error;
+    }
+};
+
 export const getPvSystemMessages = async (
     pvSystemId: string, params: SystemMessagesParams = {}, language?: string
 ): Promise<SystemMessage[]> => {
@@ -760,4 +777,64 @@ export const getSystemStatus = async (systemId: string): Promise<any> => {
         `api/systems/${systemId}/status`,
         'GET'
     );
+};
+
+export interface SystemStatusDetails {
+    PK: string;
+    SK: string;
+    pvSystemId: string;
+    status: string;
+    GreenInverters: string[];
+    MoonInverters: string[];
+    RedInverters: string[];
+    TotalInverters: number;
+    lastUpdated: string;
+}
+
+export const getSystemStatusDetails = async (systemId: string): Promise<SystemStatusDetails> => {
+    return localApiRequest<SystemStatusDetails>(
+        `api/systems/${systemId}/statusDetails`,
+        'GET'
+    );
+};
+
+// Incident Management - for incident tracking system
+export interface Incident {
+  PK: string;              // Incident#<uuid>
+  SK: string;              // User#<userId>
+  userId: string;
+  systemId: string;        // pvSystemId from backend
+  deviceId: string;
+  GSI3PK: string;          // User#<userId>
+  status: 'pending' | 'escalated' | 'dismissed';
+  expiresAt: number;       // Unix timestamp
+  updatedAt?: string;      // ISO string when updated
+  system_name: string;
+  device_name: string;
+}
+
+// === Incident Management API Functions ===
+
+/**
+ * Get all incidents for a user
+ */
+export const getUserIncidents = async (userId: string): Promise<Incident[]> => {
+  const response = await localApiRequest<Incident[]>(`/api/user/${userId}/incidents`);
+  console.log("INCIDENT RESPONSE", response)
+  return response;
+};
+
+/**
+ * Update incident status (dismiss or escalate)
+ */
+export const updateIncidentStatus = async (
+  userId: string, 
+  incidentId: string, 
+  action: 'dismiss' | 'escalate'
+): Promise<{ success: boolean; message: string }> => {
+  const response = await localApiRequest<{ success: boolean; message: string }>(
+    `/api/user/${userId}/incident/${incidentId}?action=${action}`,
+    'PUT'
+  );
+  return response;
 };
